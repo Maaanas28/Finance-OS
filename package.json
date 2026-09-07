@@ -1,0 +1,12 @@
+{
+  "name": "finance-os",
+  "version": "1.0.0",
+  "description": "Finance OS — Institutional Financial Intelligence & Terminal Platform",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm run dev --prefix backend",
+    "dev:frontend": "npm run dev --prefix frontend",
+    "test:backend": "npm test --prefix backend",
+    "build:frontend": "npm run build --prefix frontend"
+  }
+}

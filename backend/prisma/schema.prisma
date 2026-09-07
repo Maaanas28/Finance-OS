@@ -1,0 +1,139 @@
+// Finance OS Database Schema
+// Database: PostgreSQL with Prisma ORM
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ANALYST
+  ADMIN
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String    @map("password_hash")
+  fullName     String    @map("full_name")
+  role         UserRole  @default(USER)
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  portfolios      Portfolio[]
+  stressScenarios StressScenario[]
+  // watchlists      Watchlist[]
+  // aiConversations AIConversation[]
+  // alerts          Alert[]
+
+  @@map("users")
+}
+
+model Portfolio {
+  id              String             @id @default(uuid())
+  userId          String             @map("user_id")
+  name            String
+  description     String?
+  currency        String             @default("INR")
+  cashBalance     Decimal            @default(0) @db.Decimal(18, 4) @map("cash_balance")
+  benchmarkSymbol String             @default("NIFTY 50") @map("benchmark_symbol")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  holdings        PortfolioHolding[]
+  transactions    Transaction[]
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("portfolios")
+}
+
+model PortfolioHolding {
+  id             String    @id @default(uuid())
+  portfolioId    String    @map("portfolio_id")
+  symbol         String
+  exchange       String    @default("NSE")
+  name           String?
+  sector         String?
+  assetType      String    @default("EQUITY") @map("asset_type")
+  quantity       Decimal   @db.Decimal(18, 4)
+  averageBuyPrice Decimal  @db.Decimal(18, 4) @map("average_buy_price")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  portfolio      Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, symbol, exchange])
+  @@map("portfolio_holdings")
+}
+
+model Transaction {
+  id          String    @id @default(uuid())
+  portfolioId String    @map("portfolio_id")
+  symbol      String?
+  exchange    String?   @default("NSE")
+  type        String    // BUY, SELL, DEPOSIT, WITHDRAWAL
+  quantity    Decimal?  @db.Decimal(18, 4)
+  price       Decimal?  @db.Decimal(18, 4)
+  amount      Decimal   @db.Decimal(18, 4)
+  fees        Decimal   @default(0) @db.Decimal(18, 4)
+  executedAt  DateTime  @default(now()) @map("executed_at")
+  notes       String?
+  portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@map("transactions")
+}
+
+model Security {
+  id               String        @id @default(uuid())
+  symbol           String
+  name             String
+  exchange         String
+  assetType        String        @default("EQUITY") @map("asset_type") // EQUITY, INDEX, FOREX, CRYPTO, ETF
+  currency         String        @default("INR")
+  providerMetadata Json?         @map("provider_metadata")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  prices           MarketPrice[]
+
+  @@unique([symbol, exchange])
+  @@map("securities")
+}
+
+model MarketPrice {
+  id         String   @id @default(uuid())
+  securityId String   @map("security_id")
+  timestamp  DateTime
+  open       Decimal  @db.Decimal(18, 4)
+  high       Decimal  @db.Decimal(18, 4)
+  low        Decimal  @db.Decimal(18, 4)
+  close      Decimal  @db.Decimal(18, 4)
+  volume     BigInt?
+  source     String
+  dataStatus String   @map("data_status") // LIVE, DELAYED, EOD, HISTORICAL, SIMULATED
+  createdAt  DateTime @default(now()) @map("created_at")
+  security   Security @relation(fields: [securityId], references: [id], onDelete: Cascade)
+
+  @@unique([securityId, timestamp])
+  @@index([securityId, timestamp])
+  @@map("market_prices")
+}
+
+model StressScenario {
+  id          String   @id @default(uuid())
+  userId      String?  @map("user_id")
+  name        String
+  description String?
+  category    String   @default("MACRO") // MACRO, SECTOR, GEOPOLITICAL, CUSTOM
+  shocks      Json     // Array of { target: 'SECTOR'|'SYMBOL'|'MARKET', identifier: string, shockPercent: Float }
+  isSystem    Boolean  @default(false) @map("is_system")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  user        User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("stress_scenarios")
+}
+
