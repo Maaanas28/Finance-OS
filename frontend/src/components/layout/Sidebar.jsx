@@ -16,6 +16,7 @@ import {
   Terminal,
 } from 'lucide-react';
 import { Tooltip } from '../ui/Tooltip.jsx';
+import { LogoIcon } from '../ui/LogoIcon.jsx';
 
 export function Sidebar({ isCollapsed, onToggleCollapse, isMobile, onCloseMobile }) {
   const navItems = [
@@ -43,13 +44,11 @@ export function Sidebar({ isCollapsed, onToggleCollapse, isMobile, onCloseMobile
       {/* Brand Header */}
       <div className="h-14 flex items-center px-4 border-b border-[#182030] justify-between">
         <div className="flex items-center gap-2.5 overflow-hidden">
-          <div className="w-8 h-8 rounded-sm bg-[#162032] border border-[#233148] flex items-center justify-center text-emerald-400 shrink-0">
-            <Terminal className="w-4 h-4" />
-          </div>
+          <LogoIcon className="w-8 h-8" />
           {(!isCollapsed || isMobile) && (
             <div className="flex flex-col">
               <span className="font-mono font-bold text-sm tracking-wider text-white flex items-center gap-1">
-                FINANCE <span className="text-emerald-400">OS</span>
+                FINANCE <span className="text-cyan-400">OS</span>
               </span>
               <span className="text-[9px] uppercase tracking-widest text-slate-500 font-mono">
                 INSTITUTIONAL v1.0

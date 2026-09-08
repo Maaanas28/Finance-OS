@@ -1,6 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
+import { LogoIcon } from '../../components/ui/LogoIcon.jsx';
 import {
   TrendingUp,
   Briefcase,
@@ -27,12 +28,10 @@ export function LandingPage() {
       <header className="border-b border-[#182030] bg-[#0c1017] sticky top-0 z-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-7 h-7 rounded bg-[#162032] border border-[#233148] flex items-center justify-center text-emerald-400">
-              <Terminal className="w-4 h-4" />
-            </div>
+            <LogoIcon className="w-8 h-8" />
             <div>
               <span className="font-mono font-bold text-sm tracking-wider text-white">FINANCE OS</span>
-              <span className="hidden sm:inline-block ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-emerald-950/60 text-emerald-400 border border-emerald-800/40 rounded-sm">
+              <span className="hidden sm:inline-block ml-2 px-1.5 py-0.5 text-[10px] font-mono bg-cyan-950/60 text-cyan-400 border border-cyan-800/40 rounded-sm">
                 v1.0 INSTITUTIONAL
               </span>
             </div>

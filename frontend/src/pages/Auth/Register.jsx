@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext.jsx';
 import { Button } from '../../components/ui/Button.jsx';
 import { Badge } from '../../components/ui/Badge.jsx';
-import { Terminal, Lock, Mail, User, AlertCircle, ArrowLeft } from 'lucide-react';
+import { LogoIcon } from '../../components/ui/LogoIcon.jsx';
+import { Lock, Mail, User, AlertCircle, ArrowLeft } from 'lucide-react';
 
 export function Register() {
   const [fullName, setFullName] = useState('');
@@ -18,8 +19,8 @@ export function Register() {
     e.preventDefault();
     setError('');
 
-    if (password.length < 8) {
-      setError('Passphrase must be at least 8 characters long');
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
       return;
     }
 
@@ -38,9 +39,7 @@ export function Register() {
   return (
     <div className="min-h-screen bg-[#060a10] flex flex-col justify-center py-12 sm:px-6 lg:px-8 terminal-grid selection:bg-blue-600/30 selection:text-blue-200">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="mx-auto w-12 h-12 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-800 flex items-center justify-center text-white shadow-xl shadow-blue-500/20 border border-blue-400/30 mb-4">
-          <Terminal className="w-6 h-6" />
-        </div>
+        <LogoIcon className="w-14 h-14 mx-auto mb-4" />
 
         <h2 className="font-mono text-2xl font-bold tracking-tight text-white uppercase">
           Enlist Terminal Node
