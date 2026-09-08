@@ -12,7 +12,7 @@ export class RiskService {
    * Synchronize historical return series across all active holdings + benchmark
    */
   async getSynchronizedReturns(portfolioId = null, userId = null) {
-    const valuation = await portfolioService.getValuation(portfolioId, userId);
+    const valuation = await portfolioService.getValuation(portfolioId, userId, { includeRisk: false });
     const { holdings, summary, portfolio } = valuation;
 
     const equityHoldings = holdings.filter((h) => Number(h.quantity) > 0 && h.currentValue > 0);

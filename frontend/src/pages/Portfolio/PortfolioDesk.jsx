@@ -218,7 +218,7 @@ export function PortfolioDesk() {
         <MetricCard
           label="Invested Capital"
           value={formatCurrency(summary?.investedAmount || 0)}
-          subvalue={`Beta: ${summary?.beta || '0.00'} | Sharpe: ${summary?.sharpeRatio || '0.0'}`}
+          subvalue={`Beta: ${summary?.beta !== undefined ? (typeof summary.beta === 'number' ? summary.beta.toFixed(2) : summary.beta) : '0.00'} | Sharpe: ${summary?.sharpeRatio !== undefined ? (typeof summary.sharpeRatio === 'number' ? summary.sharpeRatio.toFixed(2) : summary.sharpeRatio) : '0.00'}`}
           badgeText={summary?.riskLevel || 'LOW'}
           badgeVariant="warn"
           icon={ShieldAlert}

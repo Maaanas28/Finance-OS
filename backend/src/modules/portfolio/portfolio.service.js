@@ -78,7 +78,7 @@ export class PortfolioService {
   /**
    * Mark-to-market valuation integrating directly with MarketDataService
    */
-  async getValuation(portfolioId = null, userId = null) {
+  async getValuation(portfolioId = null, userId = null, options = {}) {
     const portfolio = await this.getPortfolio(portfolioId, userId);
     const rawHoldings = portfolio.holdings || [];
 
@@ -153,6 +153,24 @@ export class PortfolioService {
       ? 'STALE'
       : 'LIVE';
 
+    let beta = 0;
+    let sharpe = 0;
+    let riskLevel = enrichedHoldings.length > 0 ? 'MODERATE' : 'LOW';
+
+    if (options.includeRisk !== false) {
+      try {
+        const { riskService } = await import('../risk/risk.service.js');
+        const riskMetrics = await riskService.getRiskMetrics(portfolioId, userId);
+        if (riskMetrics?.summary) {
+          beta = riskMetrics.summary.beta !== undefined ? riskMetrics.summary.beta : 0;
+          sharpe = riskMetrics.summary.sharpe !== undefined ? riskMetrics.summary.sharpe : 0;
+          riskLevel = riskMetrics.summary.riskLevel || riskLevel;
+        }
+      } catch (err) {
+        logger.warn(`Failed to enrich valuation with risk metrics: ${err.message}`);
+      }
+    }
+
     return {
       portfolio: {
         id: portfolio.id,
@@ -171,9 +189,10 @@ export class PortfolioService {
         totalReturn,
         totalReturnPercent,
         alpha: '0.0%',
-        beta: 0,
-        sharpeRatio: 0,
-        riskLevel: enrichedHoldings.length > 0 ? 'MODERATE' : 'LOW',
+        beta,
+        sharpe,
+        sharpeRatio: sharpe,
+        riskLevel,
         dataStatus: overallDataStatus,
       },
       holdings: enrichedHoldings,

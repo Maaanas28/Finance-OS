@@ -132,7 +132,7 @@ export function Dashboard() {
         <MetricCard
           label="Composite Risk"
           value={p.riskLevel}
-          subvalue={`Beta: ${p.beta} | Sharpe: ${p.sharpe}`}
+          subvalue={`Beta: ${typeof p.beta === 'number' ? p.beta.toFixed(2) : p.beta} | Sharpe: ${typeof p.sharpe === 'number' ? p.sharpe.toFixed(2) : p.sharpe}`}
           status={p.riskLevel === 'HIGH' ? 'loss' : p.riskLevel === 'MODERATE' ? 'warn' : 'gain'}
           badgeText={p.riskLevel === 'HIGH' ? 'High Risk' : p.riskLevel === 'MODERATE' ? 'Moderate Exposure' : 'Low Risk'}
           badgeVariant={p.riskLevel === 'HIGH' ? 'loss' : p.riskLevel === 'MODERATE' ? 'warn' : 'gain'}
