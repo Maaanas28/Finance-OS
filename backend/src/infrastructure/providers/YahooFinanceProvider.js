@@ -349,4 +349,43 @@ export class YahooFinanceProvider extends MarketDataProvider {
       candles,
     };
   }
+
+  /**
+   * Fetch live Market Movers (Gainers & Losers) with zero token cost via Yahoo Finance
+   */
+  async getTopMovers() {
+    logger.debug('Fetching Yahoo Finance market movers via NIFTY 50 securities ranking...');
+    const topSymbols = [
+      'RELIANCE', 'TCS', 'INFY', 'HDFCBANK', 'ICICIBANK',
+      'BHARTIARTL', 'ITC', 'KOTAKBANK', 'LT', 'AXISBANK',
+      'HINDUNILVR', 'SBIN', 'MARUTI', 'BAJFINANCE', 'SUNPHARMA',
+      'TITAN', 'WIPRO', 'HCLTECH', 'ASIANPAINT', 'ULTRACEMCO',
+      'NTPC', 'POWERGRID', 'ONGC', 'COALINDIA', 'ADANIENT'
+    ];
+
+    const quotes = await Promise.all(
+      topSymbols.map((sym) =>
+        this.getQuote({ symbol: sym, providerSymbols: { yahoo: `${sym}.NS` } }).catch(() => null)
+      )
+    );
+
+    const validQuotes = quotes.filter((q) => q && typeof q.price === 'number' && q.price > 0);
+    if (validQuotes.length === 0) {
+      throw new Error('Yahoo Finance market movers ranking yielded no valid quotes');
+    }
+
+    validQuotes.sort((a, b) => (b.changePercent || 0) - (a.changePercent || 0));
+
+    const gainers = validQuotes.slice(0, 5);
+    const losers = validQuotes.slice(-5).reverse();
+
+    return {
+      gainers,
+      losers,
+      dataStatus: validQuotes[0]?.dataStatus || 'DELAYED',
+      provider: 'yahoo',
+      dataSource: 'yahoo',
+      timestamp: new Date().toISOString(),
+    };
+  }
 }

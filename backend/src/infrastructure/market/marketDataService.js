@@ -306,6 +306,7 @@ export class MarketDataService {
     if (cached) return cached;
 
     return this.deduplicate(cacheKey, async () => {
+      // 1. Primary: BharatStock (if API key configured)
       if (this.bharatStock.isConfigured() && !this.isRateLimited('bharatstock') && config.MARKET_DATA_MODE !== 'mock') {
         try {
           this.dailyUsage.bharatstock++;
@@ -314,19 +315,26 @@ export class MarketDataService {
           this.staleStorage.set(cacheKey, movers);
           return movers;
         } catch (err) {
-          logger.warn(`[MarketDataEngine] BharatStock movers fetch failed (HTTP ${err.statusCode || 'ERROR'}: ${err.message}). Activating fallback chain.`);
+          logger.warn(`[MarketDataEngine] BharatStock movers fetch failed (${err.message}). Activating Yahoo Finance fallback.`);
           if (err.isRateLimit || err.statusCode === 429) {
             this.markRateLimited('bharatstock', 300);
           }
-          if (this.staleStorage.has(cacheKey)) {
-            return { ...this.staleStorage.get(cacheKey), dataStatus: 'STALE' };
-          }
         }
-      } else if (!this.bharatStock.isConfigured() && config.MARKET_DATA_MODE !== 'mock') {
-        logger.warn('[MarketDataEngine] BharatStock is not configured (BHARATSTOCK_API_KEY is empty in backend .env). Serving Market Movers via MockMarketDataProvider.');
       }
 
-      // Check stale cache before falling back to simulated mock
+      // 2. Secondary: Yahoo Finance (100% Free tokenless provider when BharatStock is unconfigured or rate limited)
+      if (this.yahooFinance.isConfigured() && !this.isRateLimited('yahoo') && config.MARKET_DATA_MODE !== 'mock') {
+        try {
+          const movers = await this.yahooFinance.getTopMovers();
+          await cacheService.set(cacheKey, movers, this.ttls.movers);
+          this.staleStorage.set(cacheKey, movers);
+          return movers;
+        } catch (err) {
+          logger.warn(`[MarketDataEngine] Yahoo Finance movers fetch failed: ${err.message}`);
+        }
+      }
+
+      // 3. Fallback: Stale Cache or Mock
       if (this.staleStorage.has(cacheKey)) {
         return { ...this.staleStorage.get(cacheKey), dataStatus: 'STALE' };
       }
