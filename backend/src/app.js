@@ -62,12 +62,13 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(requestLogger);
 
 // P2.1: Rate limiting
-// Global: 300 req / 15 min / IP
+// Global: 2000 req / 15 min / IP (skipped in dev/test)
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300,
+  max: 2000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => config.NODE_ENV !== 'production',
   handler: (req, res) => {
     res.status(429).json({
       success: false,
@@ -78,12 +79,13 @@ const globalLimiter = rateLimit({
 });
 app.use(globalLimiter);
 
-// Auth: 10 req / 15 min / IP
+// Auth: 100 req / 15 min / IP
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => config.NODE_ENV !== 'production',
   handler: (req, res) => {
     res.status(429).json({
       success: false,
@@ -93,14 +95,15 @@ const authLimiter = rateLimit({
   },
 });
 
-// AI: 20 req / hour / user (applied in route)
+// AI: 100 req / hour / user (applied in route)
 const aiLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || req.ip,
   validate: { xForwardedForHeader: false },
+  skip: () => config.NODE_ENV !== 'production',
   handler: (req, res) => {
     res.status(429).json({
       success: false,
@@ -110,12 +113,13 @@ const aiLimiter = rateLimit({
   },
 });
 
-// Market & News: 300 req / min / IP
+// Market & News: 1000 req / min / IP
 const marketLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 300,
+  max: 1000,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: () => config.NODE_ENV !== 'production',
   handler: (req, res) => {
     res.status(429).json({
       success: false,
