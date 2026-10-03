@@ -13,8 +13,9 @@ export function TopMovers() {
   const { data: res, isLoading } = useQuery({
     queryKey: ['marketMovers'],
     queryFn: () => api.getTopMovers(),
-    refetchInterval: 5000,
-    staleTime: 0,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    staleTime: 15000,
   });
 
   const moversData = res?.data || null;

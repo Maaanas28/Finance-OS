@@ -20,20 +20,22 @@ export function MarketStatusBar() {
     second: '2-digit',
   });
 
-  // Query market venue status (refetched every 5s)
+  // Query market venue status (refetched every 30s)
   const { data: statusRes } = useQuery({
     queryKey: ['marketStatus'],
     queryFn: () => api.getMarketStatus(),
-    refetchInterval: 5000,
-    staleTime: 0,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    staleTime: 15000,
   });
 
-  // Query ticker quotes (refetched every 3s for live terminal tick action)
+  // Query ticker quotes (refetched every 15s)
   const { data: quotesRes } = useQuery({
     queryKey: ['marketQuotesStrip'],
     queryFn: () => api.getQuotes(['NIFTY 50', 'SENSEX', 'S&P 500', 'NASDAQ', 'USD/INR', 'GOLD']),
-    refetchInterval: 3000,
-    staleTime: 0,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+    staleTime: 10000,
   });
 
   const quotes = quotesRes?.data && Array.isArray(quotesRes.data) ? quotesRes.data : [];

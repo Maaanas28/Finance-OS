@@ -72,7 +72,13 @@ export function PerformanceChart() {
     value: Number(c.close),
   }));
 
-  const series = isMarket ? marketSeries : portfolioSeries;
+  const rawSeries = isMarket ? marketSeries : portfolioSeries;
+  const series = (rawSeries || [])
+    .map((d) => ({
+      ...d,
+      value: Number(d.value ?? d.nav ?? d.price ?? d.equity ?? 0),
+    }))
+    .filter((d) => Number.isFinite(d.value));
 
   // Provenance badge
   const isLoading = isMarket ? niftyFetching : portFetching;
@@ -88,11 +94,10 @@ export function PerformanceChart() {
   const values = hasData ? series.map((d) => d.value) : [];
   const minValue = hasData ? Math.min(...values) : 0;
   const maxValue = hasData ? Math.max(...values) : 1;
-  // Add 2% padding top/bottom so the line never touches the edges
-  const yPad = (maxValue - minValue) * 0.05 || 1;
+  const yPad = Math.abs(maxValue - minValue) * 0.05 || 1;
   const yMin = minValue - yPad;
   const yMax = maxValue + yPad;
-  const yRange = yMax - yMin;
+  const yRange = yMax - yMin || 1;
 
   const W = 740;
   const H = 250;
@@ -101,10 +106,18 @@ export function PerformanceChart() {
   const cH = H - PAD.top - PAD.bottom;
 
   const toX = (i) => PAD.left + (i / Math.max(1, series.length - 1)) * cW;
-  const toY = (v) => PAD.top + cH - ((v - yMin) / yRange) * cH;
+  const toY = (v) => {
+    const rawY = PAD.top + cH - ((v - yMin) / yRange) * cH;
+    return Number.isFinite(rawY) ? rawY : PAD.top + cH / 2;
+  };
 
   const points = hasData
-    ? series.map((d, i) => ({ ...d, x: toX(i), y: toY(d.value), index: i }))
+    ? series.map((d, i) => ({
+        ...d,
+        x: Number.isFinite(toX(i)) ? toX(i) : PAD.left,
+        y: toY(d.value),
+        index: i,
+      }))
     : [];
 
   const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'} ${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');

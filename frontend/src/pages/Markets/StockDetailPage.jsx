@@ -39,8 +39,9 @@ export function StockDetailPage() {
   const { data: quoteRes, isLoading: quoteLoading } = useQuery({
     queryKey: ['quote', symbol],
     queryFn: () => api.getQuote(symbol, 'NSE'),
-    refetchInterval: 3000,
-    staleTime: 0,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+    staleTime: 10000,
   });
 
   const quote = quoteRes?.data || null;

@@ -68,12 +68,12 @@ export class AnalyticsService {
       valuation: {
         totalValue: summary.totalValue || 0,
         cashBalance: summary.cashBalance || 0,
-        investedCapital: summary.investedCapital || 0,
-        equityValue: summary.equityValue || 0,
-        unrealizedPnL: summary.unrealizedPnL || 0,
-        unrealizedPnLPercent: summary.unrealizedPnLPercent || 0,
-        realizedPnL: summary.realizedPnL || 0,
-        totalPnL: summary.totalPnL || 0,
+        investedCapital: summary.investedAmount ?? summary.investedCapital ?? 0,
+        equityValue: summary.stockValue ?? summary.equityValue ?? 0,
+        unrealizedPnL: summary.unrealizedPnl ?? summary.unrealizedPnL ?? 0,
+        unrealizedPnLPercent: summary.unrealizedPnlPercent ?? summary.unrealizedPnLPercent ?? 0,
+        realizedPnL: summary.realizedPnl ?? summary.realizedPnL ?? 0,
+        totalPnL: summary.totalPnl ?? summary.totalPnL ?? 0,
       },
       ratios: {
         annualizedVolatility: rmSummary.annualizedVolatility,

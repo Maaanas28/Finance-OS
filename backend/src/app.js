@@ -100,6 +100,7 @@ const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || req.ip,
+  validate: { xForwardedForHeader: false },
   handler: (req, res) => {
     res.status(429).json({
       success: false,
@@ -109,10 +110,10 @@ const aiLimiter = rateLimit({
   },
 });
 
-// Market & News: 120 req / min / IP
+// Market & News: 300 req / min / IP
 const marketLimiter = rateLimit({
   windowMs: 60 * 1000,
-  max: 120,
+  max: 300,
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {

@@ -20,14 +20,17 @@ export function MarketsPage() {
   const { data: quoteRes, isLoading: quoteLoading } = useQuery({
     queryKey: ['quote', selectedSymbol],
     queryFn: () => api.getQuote(selectedSymbol, 'NSE'),
-    refetchInterval: 3000,
-    staleTime: 0,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+    staleTime: 10000,
   });
 
   const { data: summaryRes } = useQuery({
     queryKey: ['portfolio-summary-markets'],
     queryFn: () => api.getPortfolioSummary(),
-    refetchInterval: 3000,
+    refetchInterval: 30000,
+    refetchIntervalInBackground: false,
+    staleTime: 15000,
   });
 
   const quote = quoteRes?.data || null;

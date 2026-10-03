@@ -18,8 +18,9 @@ export function MarketOverviewGrid() {
   const { data: res, isLoading } = useQuery({
     queryKey: ['marketOverviewGrid'],
     queryFn: () => api.getQuotes(['NIFTY 50', 'SENSEX', 'S&P 500', 'NASDAQ', 'USD/INR', 'GOLD']),
-    refetchInterval: 3000,
-    staleTime: 0,
+    refetchInterval: 15000,
+    refetchIntervalInBackground: false,
+    staleTime: 10000,
   });
 
   const liveItems = res?.data && Array.isArray(res.data) && res.data.length > 0 ? res.data : null;

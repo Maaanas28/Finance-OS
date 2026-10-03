@@ -403,7 +403,8 @@ class PortfolioRepository {
     if (!this.useMemoryFallback && !this.memoryPortfolios.has(portfolioId)) {
       try {
         const prisma = getPrismaClient();
-        return await prisma.$transaction(async (tx) => {
+        return await prisma.$transaction(
+          async (tx) => {
           if (type === 'BUY') {
             const { newTotalQty, newAvgPrice, totalTradeCost } = trade;
             // Atomic conditional decrement: only proceeds if cash is sufficient
@@ -490,7 +491,7 @@ class PortfolioRepository {
               },
             });
           }
-        });
+        }, { maxWait: 20000, timeout: 60000 });
       } catch (err) {
         if (shouldFallbackToMemory(err)) {
           logger.warn('DB applyTrade failed (connectivity), using in-memory fallback:', { error: err.message });
