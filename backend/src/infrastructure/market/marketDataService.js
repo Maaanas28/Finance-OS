@@ -116,25 +116,9 @@ export class MarketDataService {
     return promise;
   }
 
-  applyLiveTickJitter(quote) {
-    if (process.env.NODE_ENV === 'test') return quote;
-    if (!quote || typeof quote.price !== 'number' || quote.price <= 0) return quote;
-    const seed = (quote.symbol || 'SYM').split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    const nowStep = Math.floor(Date.now() / 3000);
-    const pseudoRandom = Math.sin(nowStep * 1.3 + seed) * 0.0008;
-    const tickedPrice = Number((quote.price * (1 + pseudoRandom)).toFixed(2));
-    const prevClose = quote.previousClose || quote.price;
-    const change = Number((tickedPrice - prevClose).toFixed(2));
-    const changePercent = Number((prevClose > 0 ? (change / prevClose) * 100 : 0).toFixed(2));
+  // P1.3: applyLiveTickJitter removed — real provider prices returned unmodified.
+  // Jitter may only be applied inside MockMarketDataProvider.
 
-    return {
-      ...quote,
-      price: tickedPrice,
-      change,
-      changePercent,
-      timestamp: new Date().toISOString(),
-    };
-  }
 
   /**
    * Get single normalized quote with multi-level caching & fallback
@@ -147,7 +131,7 @@ export class MarketDataService {
     const cached = await cacheService.get(cacheKey);
     if (cached) {
       logger.debug(`Cache hit for [${cacheKey}]`);
-      return this.applyLiveTickJitter(cached);
+      return cached;
     }
 
     // 2. Execute deduplicated fetch
@@ -159,25 +143,28 @@ export class MarketDataService {
       if (providerKey === 'mock') {
         const mockQuote = await this.mockProvider.getQuote(normalized);
         await cacheService.set(cacheKey, mockQuote, this.ttls.quote);
-        return this.applyLiveTickJitter(mockQuote);
+        return mockQuote;
       }
 
       // Try primary provider
       try {
+        // P4.3: Track all provider usage including Yahoo
+        if (providerKey === 'yahoo') this.dailyUsage.yahoo++;
         if (providerKey === 'bharatstock') this.dailyUsage.bharatstock++;
         if (providerKey === 'twelveData') this.dailyUsage.twelveData++;
 
         const liveQuote = await provider.getQuote(normalized);
 
-        // Update active and stale caches
+        // Update active and stale caches (P1.3: no jitter applied)
         await cacheService.set(cacheKey, liveQuote, this.ttls.quote);
         this.staleStorage.set(cacheKey, liveQuote);
 
-        return this.applyLiveTickJitter(liveQuote);
+        return liveQuote;
       } catch (err) {
         logger.warn(`Primary provider [${providerKey}] failed for [${normalized.symbol}]: ${err.message}`);
 
-        if (err.isRateLimit || err.statusCode === 429) {
+        // P4.3: Detect rate limit from message text (yahoo-finance2 returns text not statusCode)
+        if (err.isRateLimit || err.statusCode === 429 || /429|too many requests/i.test(err.message)) {
           this.markRateLimited(providerKey, 300);
         }
 
@@ -306,7 +293,22 @@ export class MarketDataService {
     if (cached) return cached;
 
     return this.deduplicate(cacheKey, async () => {
-      // 1. Primary: BharatStock (if API key configured)
+      // P7.1: Removed test-only branch from production code.
+      // Tests inject providers via constructor/spy if needed.
+
+      // 1. Primary: Yahoo Finance (100% Free tokenless provider - 0 token burn)
+      if (this.yahooFinance.isConfigured() && !this.isRateLimited('yahoo') && config.MARKET_DATA_MODE !== 'mock') {
+        try {
+          const movers = await this.yahooFinance.getTopMovers();
+          await cacheService.set(cacheKey, movers, this.ttls.movers);
+          this.staleStorage.set(cacheKey, movers);
+          return movers;
+        } catch (err) {
+          logger.warn(`[MarketDataEngine] Yahoo Finance movers fetch failed (${err.message}). Falling back.`);
+        }
+      }
+
+      // 2. Secondary: BharatStock (if configured and Yahoo Finance is unavailable)
       if (this.bharatStock.isConfigured() && !this.isRateLimited('bharatstock') && config.MARKET_DATA_MODE !== 'mock') {
         try {
           this.dailyUsage.bharatstock++;
@@ -315,22 +317,10 @@ export class MarketDataService {
           this.staleStorage.set(cacheKey, movers);
           return movers;
         } catch (err) {
-          logger.warn(`[MarketDataEngine] BharatStock movers fetch failed (${err.message}). Activating Yahoo Finance fallback.`);
+          logger.warn(`[MarketDataEngine] BharatStock movers fetch failed (${err.message}).`);
           if (err.isRateLimit || err.statusCode === 429) {
             this.markRateLimited('bharatstock', 300);
           }
-        }
-      }
-
-      // 2. Secondary: Yahoo Finance (100% Free tokenless provider when BharatStock is unconfigured or rate limited)
-      if (this.yahooFinance.isConfigured() && !this.isRateLimited('yahoo') && config.MARKET_DATA_MODE !== 'mock') {
-        try {
-          const movers = await this.yahooFinance.getTopMovers();
-          await cacheService.set(cacheKey, movers, this.ttls.movers);
-          this.staleStorage.set(cacheKey, movers);
-          return movers;
-        } catch (err) {
-          logger.warn(`[MarketDataEngine] Yahoo Finance movers fetch failed: ${err.message}`);
         }
       }
 

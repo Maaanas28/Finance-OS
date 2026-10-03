@@ -9,12 +9,13 @@ import { RiskMatrix } from '../../components/finance/RiskMatrix.jsx';
 import { FinanceIntelligence } from '../../components/finance/FinanceIntelligence.jsx';
 import { formatCurrency, formatPercent } from '../../utils/formatters.js';
 import { api } from '../../services/api.js';
-import { RefreshCw, Download, ShieldAlert, Wallet, TrendingUp, AlertTriangle } from 'lucide-react';
+import { RefreshCw, Download, ShieldAlert, Wallet, TrendingUp, Coins } from 'lucide-react';
 
 export function Dashboard() {
   const [portfolioData, setPortfolioData] = useState({
     totalValue: 0,
     investedAmount: 0,
+    cashBalance: 0,
     todayPnl: 0,
     todayPnlPercent: 0,
     totalReturn: 0,
@@ -34,6 +35,7 @@ export function Dashboard() {
         setPortfolioData({
           totalValue: res.data.totalValue || 0,
           investedAmount: res.data.investedAmount || 0,
+          cashBalance: res.data.cashBalance || 0,
           todayPnl: res.data.todayPnl || 0,
           todayPnlPercent: res.data.todayPnlPercent || 0,
           totalReturn: res.data.totalReturn || 0,
@@ -94,7 +96,7 @@ export function Dashboard() {
       </div>
 
       {/* Primary Financial Overview Metrics Strip */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         {/* Portfolio Value */}
         <MetricCard
           label="Portfolio Value"
@@ -103,6 +105,16 @@ export function Dashboard() {
           badgeText="Active"
           badgeVariant="neutral"
           icon={Wallet}
+        />
+
+        {/* Available Cash */}
+        <MetricCard
+          label="Available Cash"
+          value={formatCurrency(p.cashBalance)}
+          subvalue="Unallocated Reserve"
+          badgeText="Liquid"
+          badgeVariant="gain"
+          icon={Coins}
         />
 
         {/* Today's P&L */}

@@ -22,14 +22,13 @@ model User {
   passwordHash String    @map("password_hash")
   fullName     String    @map("full_name")
   role         UserRole  @default(USER)
+  // P2.2: tokenVersion enables real server-side logout
+  tokenVersion Int       @default(0) @map("token_version")
   createdAt    DateTime  @default(now()) @map("created_at")
   updatedAt    DateTime  @updatedAt @map("updated_at")
 
   portfolios      Portfolio[]
   stressScenarios StressScenario[]
-  // watchlists      Watchlist[]
-  // aiConversations AIConversation[]
-  // alerts          Alert[]
 
   @@map("users")
 }
@@ -79,6 +78,8 @@ model Transaction {
   price       Decimal?  @db.Decimal(18, 4)
   amount      Decimal   @db.Decimal(18, 4)
   fees        Decimal   @default(0) @db.Decimal(18, 4)
+  // P3.8: realizedPnl recorded on SELL transactions
+  realizedPnl Decimal?  @db.Decimal(18, 4) @map("realized_pnl")
   executedAt  DateTime  @default(now()) @map("executed_at")
   notes       String?
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)

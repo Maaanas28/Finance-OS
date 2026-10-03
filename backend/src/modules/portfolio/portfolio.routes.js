@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { portfolioController } from './portfolio.controller.js';
-import { optionalAuth } from '../../middleware/authMiddleware.js';
+import { authMiddleware } from '../../middleware/authMiddleware.js';
 
 const router = Router();
 
-router.use(optionalAuth);
+// P1.5: All portfolio routes require authentication
+router.use(authMiddleware);
 
 router.get('/list', (req, res, next) => portfolioController.getPortfolios(req, res, next));
 router.post('/', (req, res, next) => portfolioController.createPortfolio(req, res, next));

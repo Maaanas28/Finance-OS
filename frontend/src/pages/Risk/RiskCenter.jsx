@@ -201,7 +201,7 @@ export function RiskCenter() {
           label="Annualized Volatility"
           value={`${m?.annualizedVolatility !== undefined ? m.annualizedVolatility : '0.0'}%`}
           subvalue={`Benchmark: ${m?.benchmarkVolatility !== undefined ? m.benchmarkVolatility : '0.0'}% (NIFTY)`}
-          badgeText="252D Observed"
+          badgeText={`${metrics?.observationPeriodDays || 0} Sessions`}
           badgeVariant="neutral"
           icon={Activity}
         />

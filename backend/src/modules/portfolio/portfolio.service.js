@@ -2,54 +2,78 @@ import { portfolioRepository } from '../../infrastructure/database/portfolioRepo
 import { marketDataService } from '../../infrastructure/market/marketDataService.js';
 import { BadRequestError, NotFoundError } from '../../utils/errors.js';
 import { logger } from '../../utils/logger.js';
+import { config } from '../../config/index.js';
+
+// P1.2: Quote statuses that block trade execution in non-mock modes
+const NON_TRADEABLE_STATUSES = ['SIMULATED', 'UNAVAILABLE'];
+// P1.2: Stale quotes older than 5 min are rejected for trades
+const STALE_MAX_AGE_MS = 5 * 60 * 1000;
+
+/**
+ * P1.2: Check if a quote is tradeable.
+ * In explicit mock mode, any quote is accepted.
+ * In auto/live mode: SIMULATED and UNAVAILABLE are blocked; STALE > 5 min is blocked.
+ */
+function assertQuoteTradeable(quote, symbol) {
+  if (config.MARKET_DATA_MODE === 'mock') return; // explicit dev/test mode – allow everything
+
+  if (!quote || !quote.price || Number(quote.price) <= 0) {
+    throw new BadRequestError(
+      `QUOTE_NOT_TRADEABLE: Live market quote unavailable for [${symbol}]`,
+      { code: 'QUOTE_NOT_TRADEABLE' }
+    );
+  }
+
+  if (NON_TRADEABLE_STATUSES.includes(quote.dataStatus)) {
+    throw new BadRequestError(
+      `QUOTE_NOT_TRADEABLE: Quote for [${symbol}] is ${quote.dataStatus} and cannot be used for live trading`,
+      { code: 'QUOTE_NOT_TRADEABLE' }
+    );
+  }
+
+  if (quote.dataStatus === 'STALE') {
+    const fetchedAt = quote.fetchedAt ? new Date(quote.fetchedAt).getTime() : 0;
+    if (Date.now() - fetchedAt > STALE_MAX_AGE_MS) {
+      throw new BadRequestError(
+        `QUOTE_NOT_TRADEABLE: Quote for [${symbol}] is STALE (older than 5 minutes). Refresh and retry.`,
+        { code: 'QUOTE_NOT_TRADEABLE' }
+      );
+    }
+  }
+}
 
 export class PortfolioService {
   async getPortfolio(portfolioId = null, userId = null) {
     let p = null;
 
-    if (userId) {
-      // 1. If portfolioId specified, try fetching and verify ownership
-      if (portfolioId) {
-        const found = await portfolioRepository.getPortfolioById(portfolioId);
-        if (found && (found.userId === userId || !found.userId)) {
-          p = found;
+    // 1. If portfolioId specified, try fetching and verify ownership if userId provided
+    if (portfolioId) {
+      const found = await portfolioRepository.getPortfolioById(portfolioId);
+      if (found) {
+        // P1.5: Cross-user portfolioId access returns 404 when userId is supplied
+        if (userId && found.userId !== userId) {
+          throw new NotFoundError('Portfolio not found');
         }
+        p = found;
       }
-
-      // 2. If no valid owned portfolio found yet, fetch user's portfolios
-      if (!p) {
-        const list = await portfolioRepository.getPortfoliosByUser(userId);
-        p = list[0] || null;
-      }
-
-      // 3. Automatically create a clean primary portfolio if user has none
-      if (!p) {
-        p = await portfolioRepository.createPortfolio({
-          userId,
-          name: 'Primary Investment Portfolio',
-          description: 'Personal virtual investment portfolio',
-          currency: 'INR',
-          benchmarkSymbol: 'NIFTY 50',
-          initialCash: 0,
-        });
-      }
-    } else if (portfolioId) {
-      p = await portfolioRepository.getPortfolioById(portfolioId);
     }
 
-    // Unauthenticated request fallback — return clean empty guest portfolio (zero demo data)
-    if (!p && !userId) {
-      return {
-        id: 'guest-portfolio',
-        userId: null,
-        name: 'Guest Portfolio',
-        description: 'Unauthenticated preview desk',
+    // 2. If no portfolio found yet, fetch user's portfolios using userId
+    if (!p && userId) {
+      const list = await portfolioRepository.getPortfoliosByUser(userId);
+      p = list[0] || null;
+    }
+
+    // 3. Automatically create a clean primary portfolio if user has none
+    if (!p && userId) {
+      p = await portfolioRepository.createPortfolio({
+        userId,
+        name: 'Primary Investment Portfolio',
+        description: 'Personal virtual investment portfolio',
         currency: 'INR',
-        cashBalance: 0,
         benchmarkSymbol: 'NIFTY 50',
-        holdings: [],
-        transactions: [],
-      };
+        initialCash: 0,
+      });
     }
 
     if (!p) {
@@ -100,8 +124,9 @@ export class PortfolioService {
 
         const currentValue = Math.round(qty * ltp * 100) / 100;
         const costBasis = Math.round(qty * avgPrice * 100) / 100;
-        const totalPnl = Math.round((currentValue - costBasis) * 100) / 100;
-        const totalPnlPercent = costBasis > 0 ? Math.round(((currentValue - costBasis) / costBasis) * 10000) / 100 : 0;
+        // P3.8: canonical field names: unrealizedPnl (alias totalPnl)
+        const unrealizedPnl = Math.round((currentValue - costBasis) * 100) / 100;
+        const unrealizedPnlPercent = costBasis > 0 ? Math.round(((currentValue - costBasis) / costBasis) * 10000) / 100 : 0;
 
         const todayPnl = Math.round(qty * (ltp - previousClose) * 100) / 100;
         const todayPnlPercent = previousClose > 0 ? Math.round(((ltp - previousClose) / previousClose) * 10000) / 100 : 0;
@@ -111,7 +136,7 @@ export class PortfolioService {
           symbol: h.symbol,
           exchange: h.exchange || 'NSE',
           name: h.name || quote?.name || h.symbol,
-          sector: h.sector || 'Other',
+          sector: h.sector || 'Unclassified',
           assetType: h.assetType || 'EQUITY',
           quantity: qty,
           averageBuyPrice: avgPrice,
@@ -119,8 +144,10 @@ export class PortfolioService {
           previousClose,
           currentValue,
           costBasis,
-          totalPnl,
-          totalPnlPercent,
+          // P3.8: both names provided for compatibility
+          totalPnl: unrealizedPnl,
+          unrealizedPnl,
+          unrealizedPnlPercent,
           todayPnl,
           todayPnlPercent,
           dataStatus: quote?.dataStatus || 'SIMULATED',
@@ -131,6 +158,7 @@ export class PortfolioService {
 
     const cashBalance = Number(portfolio.cashBalance) || 0;
     const equityValue = pricedHoldings.reduce((sum, h) => sum + h.currentValue, 0);
+    // P3.8: investedAmount (was investedCapital)
     const investedAmount = pricedHoldings.reduce((sum, h) => sum + h.costBasis, 0);
     const totalValue = Math.round((equityValue + cashBalance) * 100) / 100;
 
@@ -140,6 +168,19 @@ export class PortfolioService {
 
     const totalReturn = Math.round((equityValue - investedAmount) * 100) / 100;
     const totalReturnPercent = investedAmount > 0 ? Math.round((totalReturn / investedAmount) * 10000) / 100 : 0;
+
+    // P3.8: unrealizedPnl and realizedPnl on summary
+    const unrealizedPnl = totalReturn; // equity value - cost basis
+    const unrealizedPnlPercent = totalReturnPercent;
+
+    // P3.8: realizedPnl from SELL transactions
+    const allTransactions = portfolio.transactions || [];
+    const realizedPnl = Math.round(
+      allTransactions
+        .filter((t) => t.type === 'SELL' && t.realizedPnl != null)
+        .reduce((sum, t) => sum + Number(t.realizedPnl), 0) * 100
+    ) / 100;
+    const totalPnl = Math.round((unrealizedPnl + realizedPnl) * 100) / 100;
 
     // Calculate allocation percentage per holding
     const enrichedHoldings = pricedHoldings.map((h) => ({
@@ -184,11 +225,15 @@ export class PortfolioService {
         equityValue: Math.round(equityValue * 100) / 100,
         cashBalance: Math.round(cashBalance * 100) / 100,
         investedAmount: Math.round(investedAmount * 100) / 100,
+        unrealizedPnl: Math.round(unrealizedPnl * 100) / 100,
+        unrealizedPnlPercent,
+        realizedPnl,
+        totalPnl,
         todayPnl,
         todayPnlPercent,
         totalReturn,
         totalReturnPercent,
-        alpha: '0.0%',
+        // P3.8: alpha removed from here; comes from analytics (3.5)
         beta,
         sharpe,
         sharpeRatio: sharpe,
@@ -203,7 +248,7 @@ export class PortfolioService {
    * Sector and Asset Class Exposure
    */
   async getAllocations(portfolioId = null, userId = null) {
-    const valuation = await this.getValuation(portfolioId, userId);
+    const valuation = await this.getValuation(portfolioId, userId, { includeRisk: false });
     const { holdings, summary } = valuation;
 
     const sectorMap = {};
@@ -245,16 +290,18 @@ export class PortfolioService {
   }
 
   /**
-   * Execute Transaction with strict financial accounting & validations
+   * P1.1 + P1.2 + P1.6: Execute Transaction
+   * - Server decides exec price from live quote (ignores client price)
+   * - Server-computed flat fee
+   * - Rejects non-tradeable quotes (SIMULATED/UNAVAILABLE/STALE>5min) in auto/live mode
+   * - Atomic writes via applyTrade
    */
   async executeTransaction(txData, userId = null) {
     const targetPortfolioId = txData.portfolioId || null;
     const portfolio = await this.getPortfolio(targetPortfolioId, userId);
 
-    const { type, symbol, exchange = 'NSE', quantity = 0, price = 0, amount = 0, fees = 0, notes } = txData;
+    const { type, symbol, exchange = 'NSE', quantity = 0, amount = 0, notes } = txData;
     const numQty = Number(quantity);
-    const numPrice = Number(price);
-    const numFees = Number(fees || 0);
     const currentCash = Number(portfolio.cashBalance) || 0;
 
     let transactionRecord = null;
@@ -264,14 +311,21 @@ export class PortfolioService {
         throw new BadRequestError('BUY orders require a valid symbol and positive quantity');
       }
 
-      // Backend authoritative live quote verification
+      // P1.1: Server fetches authoritative live quote — client price is completely ignored
       const liveQuote = await marketDataService.getQuote(symbol, exchange);
+
+      // P1.2: Reject non-real/stale quotes in auto/live mode
+      assertQuoteTradeable(liveQuote, symbol);
+
       if (!liveQuote || !liveQuote.price || Number(liveQuote.price) <= 0) {
         throw new BadRequestError(`Live market quote unavailable for [${symbol}] on ${exchange}`);
       }
 
-      const execPrice = numPrice > 0 ? numPrice : Number(liveQuote.price);
-      const totalTradeCost = Math.round((numQty * execPrice + numFees) * 100) / 100;
+      // P1.1: execPrice always from server quote
+      const execPrice = Number(liveQuote.price);
+      // P1.1: Server-computed flat fee
+      const tradeFee = config.TRADE_FLAT_FEE;
+      const totalTradeCost = Math.round((numQty * execPrice + tradeFee) * 100) / 100;
       if (totalTradeCost > currentCash) {
         throw new BadRequestError(
           `Insufficient cash balance. Required: ₹${totalTradeCost}, Available: ₹${currentCash}`
@@ -285,7 +339,7 @@ export class PortfolioService {
 
       let newQty = numQty;
       let newAvgPrice = execPrice;
-      let sector = 'Other';
+      let sector = 'Unclassified';
       let name = liveQuote.name || symbol;
 
       if (existingHolding) {
@@ -296,51 +350,45 @@ export class PortfolioService {
         sector = existingHolding.sector || sector;
         name = existingHolding.name || name;
       } else {
-        if (['RELIANCE'].includes(symbol.toUpperCase())) sector = 'Energy';
-        else if (['TCS', 'INFY', 'WIPRO'].includes(symbol.toUpperCase())) sector = 'Technology';
-        else if (['HDFCBANK', 'ICICIBANK', 'SBIN'].includes(symbol.toUpperCase())) sector = 'Financials';
-        else if (['TATAMOTORS'].includes(symbol.toUpperCase())) sector = 'Automotive';
+        // Use sector from quote if available
+        sector = liveQuote.sector || 'Unclassified';
       }
 
-      // Update position
-      await portfolioRepository.upsertHolding(portfolio.id, {
+      // P1.6: Atomic trade via applyTrade
+      transactionRecord = await portfolioRepository.applyTrade(portfolio.id, {
+        type: 'BUY',
         symbol: symbol.toUpperCase(),
         exchange,
         name,
         sector,
-        quantity: newQty,
-        averageBuyPrice: newAvgPrice,
-      });
-
-      // Deduct cash
-      const newCash = Math.round((currentCash - totalTradeCost) * 100) / 100;
-      await portfolioRepository.updateCashBalance(portfolio.id, newCash);
-
-      // Record transaction
-      transactionRecord = await portfolioRepository.recordTransaction(portfolio.id, {
-        symbol: symbol.toUpperCase(),
-        exchange,
-        type: 'BUY',
         quantity: numQty,
-        price: execPrice,
-        amount: totalTradeCost,
-        fees: numFees,
+        newTotalQty: newQty,
+        newAvgPrice,
+        execPrice,
+        tradeFee,
+        totalTradeCost,
         notes: notes || `Acquired ${numQty} shares @ ₹${execPrice}`,
+        existingHolding,
       });
 
-      logger.info(`BUY trade executed for [${symbol}]: ${numQty} shares @ ₹${execPrice}`);
+      logger.info(`BUY trade executed for [${symbol}]: ${numQty} shares @ ₹${execPrice} fee ₹${tradeFee}`);
     } else if (type === 'SELL') {
       if (!symbol || numQty <= 0) {
         throw new BadRequestError('SELL orders require a valid symbol and positive quantity');
       }
 
-      // Backend authoritative live quote verification
+      // P1.1: Server fetches authoritative live quote
       const liveQuote = await marketDataService.getQuote(symbol, exchange);
+
+      // P1.2: Reject non-real/stale quotes
+      assertQuoteTradeable(liveQuote, symbol);
+
       if (!liveQuote || !liveQuote.price || Number(liveQuote.price) <= 0) {
         throw new BadRequestError(`Live market quote unavailable for [${symbol}] on ${exchange}`);
       }
 
-      const execPrice = numPrice > 0 ? numPrice : Number(liveQuote.price);
+      const execPrice = Number(liveQuote.price);
+      const tradeFee = config.TRADE_FLAT_FEE;
       const existingHolding = (portfolio.holdings || []).find(
         (h) => h.symbol.toUpperCase() === symbol.toUpperCase() && h.exchange === exchange
       );
@@ -353,41 +401,31 @@ export class PortfolioService {
       }
 
       const grossProceeds = Math.round(numQty * execPrice * 100) / 100;
-      const netProceeds = Math.round((grossProceeds - numFees) * 100) / 100;
+      const netProceeds = Math.round((grossProceeds - tradeFee) * 100) / 100;
       const costBasis = Math.round(numQty * Number(existingHolding.averageBuyPrice) * 100) / 100;
-      const realizedGain = Math.round((netProceeds - costBasis) * 100) / 100;
+      // P3.8: realizedPnl on SELL
+      const realizedPnl = Math.round((netProceeds - costBasis) * 100) / 100;
 
       const remainingQty = Number(existingHolding.quantity) - numQty;
-      if (remainingQty <= 0) {
-        await portfolioRepository.deleteHolding(portfolio.id, existingHolding.id);
-      } else {
-        await portfolioRepository.upsertHolding(portfolio.id, {
-          symbol: existingHolding.symbol,
-          exchange: existingHolding.exchange,
-          name: existingHolding.name,
-          sector: existingHolding.sector,
-          quantity: remainingQty,
-          averageBuyPrice: existingHolding.averageBuyPrice,
-        });
-      }
 
-      // Credit cash
-      const newCash = Math.round((currentCash + netProceeds) * 100) / 100;
-      await portfolioRepository.updateCashBalance(portfolio.id, newCash);
-
-      // Record transaction
-      transactionRecord = await portfolioRepository.recordTransaction(portfolio.id, {
+      // P1.6: Atomic trade via applyTrade
+      transactionRecord = await portfolioRepository.applyTrade(portfolio.id, {
+        type: 'SELL',
         symbol: symbol.toUpperCase(),
         exchange,
-        type: 'SELL',
+        name: existingHolding.name,
+        sector: existingHolding.sector,
         quantity: numQty,
-        price: execPrice,
-        amount: netProceeds,
-        fees: numFees,
-        notes: notes || `Realized P&L: ${realizedGain >= 0 ? '+' : ''}₹${realizedGain}`,
+        remainingQty,
+        execPrice,
+        tradeFee,
+        netProceeds,
+        realizedPnl,
+        existingHolding,
+        notes: notes || `Realized P&L: ${realizedPnl >= 0 ? '+' : ''}₹${realizedPnl}`,
       });
 
-      logger.info(`SELL trade executed for [${symbol}]: ${numQty} shares @ ₹${execPrice}`);
+      logger.info(`SELL trade executed for [${symbol}]: ${numQty} shares @ ₹${execPrice} fee ₹${tradeFee}`);
     } else if (type === 'DEPOSIT') {
       const depositAmt = Number(amount);
       if (depositAmt <= 0) {
@@ -426,10 +464,11 @@ export class PortfolioService {
     return {
       success: true,
       transaction: transactionRecord,
+      fee: type === 'BUY' || type === 'SELL' ? config.TRADE_FLAT_FEE : 0,
     };
   }
 
-  async getTransactions(portfolioId = null, userId = null) {
+  async getTransactions(portfolioId = null, userId = null, options = {}) {
     const portfolio = await this.getPortfolio(portfolioId, userId);
     if (!portfolio.transactions && portfolio.id) {
       const fullP = await portfolioRepository.getPortfolioById(portfolio.id);
@@ -438,13 +477,18 @@ export class PortfolioService {
     return portfolio.transactions || [];
   }
 
+  // P1.8: getAllTransactions (no limit) for risk/analytics
+  async getAllTransactions(portfolioId = null, userId = null) {
+    const portfolio = await this.getPortfolio(portfolioId, userId);
+    return await portfolioRepository.getAllTransactions(portfolio.id);
+  }
+
   async getPerformanceHistory(portfolioId = null, userId = null, timeframe = '1M') {
-    const valuation = await this.getValuation(portfolioId, userId);
+    const valuation = await this.getValuation(portfolioId, userId, { includeRisk: false });
     const currentVal = valuation.summary.totalValue;
     const holdings = valuation.holdings || [];
 
-    // --- STRICT RULE: return empty performance series if user has no real holdings or zero portfolio value.
-    // Do NOT generate fake data for users with no portfolio activity.
+    // STRICT RULE: return empty performance series if user has no real holdings or zero portfolio value.
     if (currentVal <= 0 || holdings.length === 0) {
       return {
         timeframe,
@@ -454,13 +498,9 @@ export class PortfolioService {
       };
     }
 
-    // User has holdings: build an approximate equity curve anchored to today's mark-to-market value.
-    // This is an APPROXIMATION based on current valuation since we do not store intra-period snapshots.
-    // The series starts from the earliest holding's executedAt date where available.
     const portfolio = await this.getPortfolio(portfolioId, userId);
     const transactions = (portfolio.transactions || []).filter((t) => t.type === 'BUY' || t.type === 'SELL');
 
-    // If no actual buy/sell transactions exist yet (just deposits), return empty series.
     if (transactions.length === 0) {
       return {
         timeframe,
@@ -470,33 +510,48 @@ export class PortfolioService {
       };
     }
 
-    const count = timeframe === '1D' ? 24 : timeframe === '1W' ? 7 : timeframe === '1M' ? 30 : timeframe === '1Y' ? 52 : 100;
-    const series = [];
+    // P3.10: Use real NAV series from riskService if available
+    try {
+      const { riskService } = await import('../risk/risk.service.js');
+      const syncReturns = await riskService.getSynchronizedReturns(portfolioId, userId);
+      if (syncReturns?.navSeries && syncReturns.navSeries.length > 0) {
+        const nav = syncReturns.navSeries;
 
-    // Compute simple invested cost at each step as a proxy for historical value.
-    // Anchors start at total invested amount, ends at current mark-to-market value.
-    const investedAmount = valuation.summary.investedAmount || currentVal;
-    for (let i = count; i >= 0; i--) {
-      const date = new Date(Date.now() - i * (timeframe === '1D' ? 3600000 : 86400000));
-      // Linear interpolation from investedAmount to currentVal across the period
-      const factor = i === 0 ? 1 : (count - i) / count;
-      const val = Math.round((investedAmount + factor * (currentVal - investedAmount)) * 100) / 100;
+        // Slice by timeframe
+        const now = Date.now();
+        const msPerDay = 86400000;
+        const cutoffMs = timeframe === '1M' ? 30 * msPerDay
+          : timeframe === '3M' ? 90 * msPerDay
+          : timeframe === '6M' ? 180 * msPerDay
+          : timeframe === '1Y' ? 365 * msPerDay
+          : 0; // ALL = no cutoff
 
-      series.push({
-        time: timeframe === '1D' ? date.toISOString().substring(11, 16) : date.toISOString().split('T')[0],
-        value: val,
-      });
+        const filtered = cutoffMs > 0
+          ? nav.filter((pt) => new Date(pt.date).getTime() >= now - cutoffMs)
+          : nav;
+
+        const performance = filtered.map((pt) => ({
+          time: pt.date,
+          value: pt.value,
+        }));
+
+        return {
+          timeframe,
+          currentValuation: currentVal,
+          benchmark: valuation.portfolio.benchmarkSymbol,
+          performance,
+        };
+      }
+    } catch (err) {
+      logger.warn(`Failed to get NAV series from risk service: ${err.message}`);
     }
 
-    if (series.length > 0) {
-      series[series.length - 1].value = currentVal;
-    }
-
+    // Fallback: return empty when history insufficient
     return {
       timeframe,
       currentValuation: currentVal,
       benchmark: valuation.portfolio.benchmarkSymbol,
-      performance: series,
+      performance: [],
     };
   }
 }

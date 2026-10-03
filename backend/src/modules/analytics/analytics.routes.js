@@ -1,10 +1,11 @@
 import { Router } from 'express';
 import { analyticsController } from './analytics.controller.js';
-import { optionalAuth } from '../../middleware/authMiddleware.js';
+import { authMiddleware } from '../../middleware/authMiddleware.js';
 
 const router = Router();
 
-router.use(optionalAuth);
+// P1.5: All analytics routes require authentication
+router.use(authMiddleware);
 
 router.get('/summary', (req, res, next) => analyticsController.getSummary(req, res, next));
 router.get('/performance-series', (req, res, next) => analyticsController.getPerformanceSeries(req, res, next));

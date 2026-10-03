@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { riskController } from './risk.controller.js';
-import { optionalAuth } from '../../middleware/authMiddleware.js';
+import { authMiddleware } from '../../middleware/authMiddleware.js';
 
 const router = Router();
 
-// Apply optional auth to enable authenticated user context when present
-router.use(optionalAuth);
+// P1.5: All risk routes require authentication
+router.use(authMiddleware);
 
 // Risk Analytics & Cockpit
 router.get('/snapshot', (req, res, next) => riskController.getSnapshot(req, res, next));

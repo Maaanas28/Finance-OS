@@ -1,5 +1,6 @@
 import { getPrismaClient } from './prisma.js';
 import { logger } from '../../utils/logger.js';
+import { shouldFallbackToMemory } from './resilience.js';
 import crypto from 'crypto';
 
 class UserRepository {
@@ -17,8 +18,13 @@ class UserRepository {
           where: { email: normalizedEmail },
         });
       } catch (err) {
-        logger.warn('Prisma findByEmail error, switching to resilient fallback:', { error: err.message });
-        this.useMemoryFallback = true;
+        if (shouldFallbackToMemory(err)) {
+          logger.warn('DB findByEmail failed (connectivity), using in-memory fallback:', { error: err.message });
+          this.useMemoryFallback = true;
+        } else {
+          // P1.7: domain errors (e.g. invalid query) propagate
+          throw err;
+        }
       }
     }
 
@@ -41,13 +47,18 @@ class UserRepository {
             email: true,
             fullName: true,
             role: true,
+            tokenVersion: true,
             createdAt: true,
             updatedAt: true,
           },
         });
       } catch (err) {
-        logger.warn('Prisma findById error, switching to resilient fallback:', { error: err.message });
-        this.useMemoryFallback = true;
+        if (shouldFallbackToMemory(err)) {
+          logger.warn('DB findById failed (connectivity), using in-memory fallback:', { error: err.message });
+          this.useMemoryFallback = true;
+        } else {
+          throw err;
+        }
       }
     }
 
@@ -68,19 +79,34 @@ class UserRepository {
             passwordHash,
             fullName,
             role,
+            tokenVersion: 0,
           },
           select: {
             id: true,
             email: true,
             fullName: true,
             role: true,
+            tokenVersion: true,
             createdAt: true,
             updatedAt: true,
           },
         });
       } catch (err) {
-        logger.warn('Prisma create user error, switching to resilient fallback:', { error: err.message });
-        this.useMemoryFallback = true;
+        if (shouldFallbackToMemory(err) || (err.message && err.message.includes('Unknown argument'))) {
+          logger.warn('DB create user failed, using in-memory fallback:', { error: err.message });
+          this.useMemoryFallback = true;
+        } else {
+          // P1.7: domain errors (like P2002 unique email violation) propagate
+          throw err;
+        }
+      }
+    }
+
+    // In-memory: check for unique email
+    for (const u of this.memoryUsers.values()) {
+      if (u.email === normalizedEmail) {
+        const { ConflictError } = await import('../../utils/errors.js');
+        throw new ConflictError('A user with this email already exists');
       }
     }
 
@@ -92,6 +118,7 @@ class UserRepository {
       passwordHash,
       fullName,
       role,
+      tokenVersion: 0,
       createdAt: now,
       updatedAt: now,
     };
@@ -99,6 +126,31 @@ class UserRepository {
 
     const { passwordHash: _, ...userWithoutPassword } = newUser;
     return userWithoutPassword;
+  }
+
+  // P2.2: Increment tokenVersion for real server-side logout
+  async incrementTokenVersion(userId) {
+    if (!this.useMemoryFallback) {
+      try {
+        const prisma = getPrismaClient();
+        return await prisma.user.update({
+          where: { id: userId },
+          data: { tokenVersion: { increment: 1 } },
+        });
+      } catch (err) {
+        if (shouldFallbackToMemory(err)) {
+          this.useMemoryFallback = true;
+        } else {
+          throw err;
+        }
+      }
+    }
+
+    const user = this.memoryUsers.get(userId);
+    if (user) {
+      user.tokenVersion = (user.tokenVersion || 0) + 1;
+      user.updatedAt = new Date();
+    }
   }
 }
 

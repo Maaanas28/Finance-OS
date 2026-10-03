@@ -1,11 +1,35 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { portfolioService } from '../src/modules/portfolio/portfolio.service.js';
 import { portfolioRepository } from '../src/infrastructure/database/portfolioRepository.js';
+import { marketDataService } from '../src/infrastructure/market/marketDataService.js';
 
 describe('PortfolioService Engine & Financial Calculations', () => {
   beforeEach(() => {
     // Re-seed model alpha portfolio before tests
     portfolioRepository.seedModelPortfolio();
+
+    vi.spyOn(marketDataService, 'getQuote').mockImplementation(async (symbol, exchange) => {
+      const prices = {
+        'RELIANCE': 3000,
+        'TCS': 4200,
+        'HDFCBANK': 755,
+        'INFY': 1720,
+        'TATAMOTORS': 820,
+      };
+      const price = prices[symbol] || 1000;
+      return {
+        symbol,
+        exchange: exchange || 'NSE',
+        price,
+        previousClose: price * 0.99,
+        change: price * 0.01,
+        changePercent: 1.0,
+        currency: 'INR',
+        dataStatus: 'LIVE',
+        dataSource: 'mock-test',
+        timestamp: new Date().toISOString(),
+      };
+    });
   });
 
   it('should compute mark-to-market valuation, cost basis, and unrealized P&L', async () => {
@@ -31,7 +55,7 @@ describe('PortfolioService Engine & Financial Calculations', () => {
     const allocations = await portfolioService.getAllocations('portfolio-model-alpha');
 
     expect(allocations.sectors.length).toBeGreaterThan(0);
-    const techSector = allocations.sectors.find((s) => s.name === 'Technology');
+    const techSector = allocations.sectors.find((s) => s.name === 'Information Technology' || s.name === 'Technology');
     expect(techSector).toBeDefined();
     // TCS + INFY make up > 30% of portfolio
     expect(techSector.percent).toBeGreaterThan(30);
@@ -56,11 +80,11 @@ describe('PortfolioService Engine & Financial Calculations', () => {
 
     expect(res.success).toBe(true);
     expect(res.transaction.type).toBe('BUY');
-    expect(res.transaction.amount).toBe(30015);
+    expect(res.transaction.amount).toBe(30020);
 
     const updatedValuation = await portfolioService.getValuation('portfolio-model-alpha');
-    // Cash should decrease by ₹30,015
-    expect(updatedValuation.summary.cashBalance).toBe(Math.round((initialCash - 30015) * 100) / 100);
+    // Cash should decrease by ₹30,020
+    expect(updatedValuation.summary.cashBalance).toBe(Math.round((initialCash - 30020) * 100) / 100);
 
     // Quantity should increase from 120 to 130
     const reliance = updatedValuation.holdings.find((h) => h.symbol === 'RELIANCE');
@@ -88,8 +112,8 @@ describe('PortfolioService Engine & Financial Calculations', () => {
     const initialCash = initialValuation.summary.cashBalance;
 
     // SELL 20 shares of TCS at ₹4,200 (averageBuyPrice was ₹3,500)
-    // Gross: 20 * 4200 = 84,000. Fees: 42. Net proceeds: 83,958
-    // Cost basis: 20 * 3500 = 70,000. Realized P&L: 83,958 - 70,000 = +₹13,958
+    // Gross: 20 * 4200 = 84,000. Fees: 20. Net proceeds: 83,980
+    // Cost basis: 20 * 3500 = 70,000. Realized P&L: 83,980 - 70,000 = +₹13,980
     const res = await portfolioService.executeTransaction({
       portfolioId: 'portfolio-model-alpha',
       type: 'SELL',
@@ -102,11 +126,11 @@ describe('PortfolioService Engine & Financial Calculations', () => {
 
     expect(res.success).toBe(true);
     expect(res.transaction.type).toBe('SELL');
-    expect(res.transaction.notes).toContain('Realized P&L: +₹13958');
+    expect(res.transaction.notes).toContain('Realized P&L: +₹13980');
 
     const updatedValuation = await portfolioService.getValuation('portfolio-model-alpha');
     // Cash should increase by net proceeds
-    expect(updatedValuation.summary.cashBalance).toBe(Math.round((initialCash + 83958) * 100) / 100);
+    expect(updatedValuation.summary.cashBalance).toBe(Math.round((initialCash + 83980) * 100) / 100);
 
     // TCS quantity should decrease from 60 to 40
     const tcs = updatedValuation.holdings.find((h) => h.symbol === 'TCS');

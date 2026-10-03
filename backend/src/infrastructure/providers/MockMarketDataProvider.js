@@ -1,5 +1,6 @@
 import { MarketDataProvider } from './MarketDataProvider.js';
 import { INDIAN_SECURITY_UNIVERSE, searchSecurityUniverse } from '../market/securityUniverse.js';
+import { NotFoundError } from '../../utils/errors.js';
 
 export class MockMarketDataProvider extends MarketDataProvider {
   constructor() {
@@ -113,6 +114,7 @@ export class MockMarketDataProvider extends MarketDataProvider {
         name: 'Reliance Industries Ltd',
         exchange: 'NSE',
         assetType: 'EQUITY',
+        sector: 'Energy',
         currency: 'INR',
         price: 2980.50,
         open: 2920.00,
@@ -130,6 +132,7 @@ export class MockMarketDataProvider extends MarketDataProvider {
         name: 'Tata Consultancy Services',
         exchange: 'NSE',
         assetType: 'EQUITY',
+        sector: 'Information Technology',
         currency: 'INR',
         price: 4230.00,
         open: 4150.00,
@@ -139,6 +142,114 @@ export class MockMarketDataProvider extends MarketDataProvider {
         change: 95.50,
         changePercent: 2.31,
         volume: 2120000,
+        marketStatus: 'OPEN',
+      },
+      'HDFCBANK': {
+        symbol: 'HDFCBANK',
+        displaySymbol: 'HDFCBANK',
+        name: 'HDFC Bank Ltd',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Financial Services',
+        currency: 'INR',
+        price: 1675.20,
+        open: 1660.00,
+        high: 1682.50,
+        low: 1655.00,
+        previousClose: 1660.00,
+        change: 15.20,
+        changePercent: 0.92,
+        volume: 8500000,
+        marketStatus: 'OPEN',
+      },
+      'INFY': {
+        symbol: 'INFY',
+        displaySymbol: 'INFY',
+        name: 'Infosys Ltd',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Information Technology',
+        currency: 'INR',
+        price: 1845.30,
+        open: 1890.00,
+        high: 1895.00,
+        low: 1840.00,
+        previousClose: 1893.50,
+        change: -48.20,
+        changePercent: -2.55,
+        volume: 7200000,
+        marketStatus: 'OPEN',
+      },
+      'TATAMOTORS': {
+        symbol: 'TATAMOTORS',
+        displaySymbol: 'TATAMOTORS',
+        name: 'Tata Motors Ltd',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Automobile',
+        currency: 'INR',
+        price: 978.40,
+        open: 1000.00,
+        high: 1002.00,
+        low: 974.50,
+        previousClose: 1000.00,
+        change: -21.60,
+        changePercent: -2.16,
+        volume: 8900000,
+        marketStatus: 'OPEN',
+      },
+      'ICICIBANK': {
+        symbol: 'ICICIBANK',
+        displaySymbol: 'ICICIBANK',
+        name: 'ICICI Bank Ltd',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Financial Services',
+        currency: 'INR',
+        price: 1210.80,
+        open: 1229.00,
+        high: 1232.00,
+        low: 1207.00,
+        previousClose: 1229.00,
+        change: -18.20,
+        changePercent: -1.48,
+        volume: 6500000,
+        marketStatus: 'OPEN',
+      },
+      'WIPRO': {
+        symbol: 'WIPRO',
+        displaySymbol: 'WIPRO',
+        name: 'Wipro Limited',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Information Technology',
+        currency: 'INR',
+        price: 524.10,
+        open: 531.60,
+        high: 533.00,
+        low: 522.00,
+        previousClose: 531.60,
+        change: -7.50,
+        changePercent: -1.41,
+        volume: 3100000,
+        marketStatus: 'OPEN',
+      },
+      'BHARTIARTL': {
+        symbol: 'BHARTIARTL',
+        displaySymbol: 'BHARTIARTL',
+        name: 'Bharti Airtel Ltd',
+        exchange: 'NSE',
+        assetType: 'EQUITY',
+        sector: 'Telecommunication',
+        currency: 'INR',
+        price: 1640.10,
+        open: 1615.50,
+        high: 1645.00,
+        low: 1612.00,
+        previousClose: 1615.50,
+        change: 24.60,
+        changePercent: 1.52,
+        volume: 3600000,
         marketStatus: 'OPEN',
       },
       'AAPL': {
@@ -192,6 +303,23 @@ export class MockMarketDataProvider extends MarketDataProvider {
         volume: 28500000000,
         marketStatus: 'OPEN',
       },
+      'BTC-USD': {
+        symbol: 'BTC-USD',
+        displaySymbol: 'BTC-USD',
+        name: 'Bitcoin / US Dollar',
+        exchange: 'CRYPTO',
+        assetType: 'CRYPTO',
+        currency: 'USD',
+        price: 68420.00,
+        open: 67100.00,
+        high: 68900.00,
+        low: 66800.00,
+        previousClose: 67200.00,
+        change: 1220.00,
+        changePercent: 1.82,
+        volume: 28500000000,
+        marketStatus: 'OPEN',
+      },
     };
   }
 
@@ -207,8 +335,17 @@ export class MockMarketDataProvider extends MarketDataProvider {
       };
     }
 
-    // Lookup in security universe
-    const foundInMaster = INDIAN_SECURITY_UNIVERSE.find(s => s.symbol.toUpperCase() === key);
+    // P1.2: Check if symbol is in the known universe
+    const foundInMaster = INDIAN_SECURITY_UNIVERSE.find(
+      (s) => s.symbol.toUpperCase() === key
+    );
+
+    if (!foundInMaster) {
+      // P1.2: Unknown symbols throw NotFoundError — cannot be traded in any mode
+      throw new NotFoundError(`Unknown symbol: ${key}. Symbol not found in security universe.`);
+    }
+
+    // Symbol found in universe but no static quote — generate a deterministic mock price
     let hash = 0;
     for (let i = 0; i < key.length; i++) hash = key.charCodeAt(i) + ((hash << 5) - hash);
     const basePrice = Math.abs(hash % 2500) + 120;
@@ -218,11 +355,11 @@ export class MockMarketDataProvider extends MarketDataProvider {
     const base = {
       symbol: key,
       displaySymbol: key,
-      name: foundInMaster ? foundInMaster.name : key,
-      exchange: foundInMaster ? foundInMaster.exchange : 'NSE',
-      assetType: foundInMaster ? foundInMaster.assetType : 'EQUITY',
-      sector: foundInMaster ? foundInMaster.sector : 'General',
-      currency: foundInMaster ? foundInMaster.currency : 'INR',
+      name: foundInMaster.name,
+      exchange: foundInMaster.exchange,
+      assetType: foundInMaster.assetType,
+      sector: foundInMaster.sector,
+      currency: foundInMaster.currency || 'INR',
       price: basePrice,
       open: basePrice - change,
       high: basePrice + Math.abs(change) * 1.5,
@@ -245,16 +382,51 @@ export class MockMarketDataProvider extends MarketDataProvider {
 
   async getHistoricalPrices(normalizedInfo, options = {}) {
     const { timeframe = '1M', interval = '1day' } = options;
-    const points = timeframe === '1D' ? 24 : timeframe === '1W' ? 7 : timeframe === '1M' ? 30 : timeframe === '1Y' ? 52 : 90;
+
+    // P3.1: For 1Y + daily interval, return 252 business-day candles (skip weekends)
+    let points;
+    if (timeframe === '1Y' && (interval === '1day' || interval === '1d')) {
+      points = 252; // trading days
+    } else if (timeframe === '1D') {
+      points = 24;
+    } else if (timeframe === '1W') {
+      points = 7;
+    } else if (timeframe === '1M') {
+      points = 30;
+    } else if (timeframe === '3M') {
+      points = 63; // ~63 trading days
+    } else if (timeframe === '6M') {
+      points = 126; // ~126 trading days
+    } else if (timeframe === '5Y') {
+      points = 60; // weeks
+    } else {
+      points = 52; // 1Y weekly default
+    }
+
     const currentQuote = await this.getQuote(normalizedInfo);
     const basePrice = currentQuote.price;
 
     const candles = [];
     let cur = basePrice * 0.94;
+    let dayOffset = points;
 
-    for (let i = points; i >= 0; i--) {
-      const date = new Date(Date.now() - i * (timeframe === '1D' ? 3600000 : 86400000));
-      const drift = (Math.random() - 0.48) * (basePrice * 0.02);
+    for (let i = 0; i < points; i++) {
+      let date;
+      if (timeframe === '1D') {
+        date = new Date(Date.now() - (points - i) * 3600000);
+      } else {
+        // P3.1: For daily candles, skip weekends to get business days
+        let d = new Date(Date.now());
+        let bizDaysBack = points - i;
+        while (bizDaysBack > 0) {
+          d = new Date(d.getTime() - 86400000);
+          const dow = d.getUTCDay();
+          if (dow !== 0 && dow !== 6) bizDaysBack--;
+        }
+        date = d;
+      }
+
+      const drift = (Math.random() - 0.48) * (basePrice * 0.015);
       cur = Math.max(1, cur + drift);
       const open = cur - Math.random() * (basePrice * 0.005);
       const close = cur;
@@ -264,6 +436,7 @@ export class MockMarketDataProvider extends MarketDataProvider {
 
       candles.push({
         timestamp: date.toISOString(),
+        date: date.toISOString().split('T')[0],
         time: timeframe === '1D' ? date.toISOString().substring(11, 16) : date.toISOString().split('T')[0],
         open: Number(open.toFixed(2)),
         high: Number(high.toFixed(2)),
@@ -292,15 +465,15 @@ export class MockMarketDataProvider extends MarketDataProvider {
       fetchedAt: new Date().toISOString(),
       gainers: [
         { symbol: 'RELIANCE', name: 'Reliance Industries', price: 2980.50, change: 84.30, changePercent: 2.91, volume: '4.8M', sector: 'Energy', exchange: 'NSE' },
-        { symbol: 'TCS', name: 'Tata Consultancy Services', price: 4230.00, change: 95.50, changePercent: 2.31, volume: '2.1M', sector: 'Technology', exchange: 'NSE' },
-        { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1675.20, change: 29.80, changePercent: 1.81, volume: '11.4M', sector: 'Financials', exchange: 'NSE' },
-        { symbol: 'BHARTIARTL', name: 'Bharti Airtel', price: 1640.10, change: 24.60, changePercent: 1.52, volume: '3.6M', sector: 'Telecom', exchange: 'NSE' },
+        { symbol: 'TCS', name: 'Tata Consultancy Services', price: 4230.00, change: 95.50, changePercent: 2.31, volume: '2.1M', sector: 'Information Technology', exchange: 'NSE' },
+        { symbol: 'HDFCBANK', name: 'HDFC Bank Ltd', price: 1675.20, change: 29.80, changePercent: 1.81, volume: '11.4M', sector: 'Financial Services', exchange: 'NSE' },
+        { symbol: 'BHARTIARTL', name: 'Bharti Airtel', price: 1640.10, change: 24.60, changePercent: 1.52, volume: '3.6M', sector: 'Telecommunication', exchange: 'NSE' },
       ],
       losers: [
-        { symbol: 'INFY', name: 'Infosys Ltd', price: 1845.30, change: -48.20, changePercent: -2.55, volume: '7.2M', sector: 'Technology', exchange: 'NSE' },
-        { symbol: 'TATAMOTORS', name: 'Tata Motors', price: 978.40, change: -21.60, changePercent: -2.16, volume: '8.9M', sector: 'Automotive', exchange: 'NSE' },
-        { symbol: 'ICICIBANK', name: 'ICICI Bank', price: 1210.80, change: -18.20, changePercent: -1.48, volume: '6.5M', sector: 'Financials', exchange: 'NSE' },
-        { symbol: 'WIPRO', name: 'Wipro Limited', price: 524.10, change: -7.50, changePercent: -1.41, volume: '3.1M', sector: 'Technology', exchange: 'NSE' },
+        { symbol: 'INFY', name: 'Infosys Ltd', price: 1845.30, change: -48.20, changePercent: -2.55, volume: '7.2M', sector: 'Information Technology', exchange: 'NSE' },
+        { symbol: 'TATAMOTORS', name: 'Tata Motors', price: 978.40, change: -21.60, changePercent: -2.16, volume: '8.9M', sector: 'Automobile', exchange: 'NSE' },
+        { symbol: 'ICICIBANK', name: 'ICICI Bank', price: 1210.80, change: -18.20, changePercent: -1.48, volume: '6.5M', sector: 'Financial Services', exchange: 'NSE' },
+        { symbol: 'WIPRO', name: 'Wipro Limited', price: 524.10, change: -7.50, changePercent: -1.41, volume: '3.1M', sector: 'Information Technology', exchange: 'NSE' },
       ],
     };
   }

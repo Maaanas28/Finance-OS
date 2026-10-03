@@ -276,6 +276,7 @@ describe('HDFCBANK & Indian Equity Market Data Subsystem Regression Suite', () =
     });
 
     it('should propagate LIVE dataStatus to Market Movers when BharatStock succeeds', async () => {
+      vi.spyOn(marketService.yahooFinance, 'isConfigured').mockReturnValue(false);
       vi.spyOn(marketService.bharatStock, 'isConfigured').mockReturnValue(true);
       vi.spyOn(marketService.bharatStock, 'getTopMovers').mockResolvedValue({
         dataSource: 'bharatstock',

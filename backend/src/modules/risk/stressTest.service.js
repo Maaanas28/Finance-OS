@@ -16,8 +16,10 @@ export class StressTestService {
    * @param {string} portfolioId
    * @param {Object} options - { scenarioId, customScenario, userId }
    */
-  async executeStressTest(portfolioId = null, options = {}) {
-    const { scenarioId, customScenario, userId = null } = options;
+  async executeStressTest(portfolioId = null, options = {}, userIdArg = null) {
+    // P1.5: Accept userId as either options.userId or 3rd positional arg
+    const { scenarioId, customScenario, userId: uidFromOptions = null } = options;
+    const userId = uidFromOptions || userIdArg;
 
     let scenario = null;
     if (scenarioId) {
@@ -69,30 +71,47 @@ export class StressTestService {
         effectiveShockPercent = Number(symbolShock.shockPercent);
         shockRule = `Direct symbol shock: ${effectiveShockPercent > 0 ? '+' : ''}${effectiveShockPercent}%`;
       } else {
-        // 2. Sector Shock
-        const sectorShock = scenario.shocks.find(
-          (s) => s.target === 'SECTOR' && (
-            s.identifier?.toLowerCase() === sector ||
-            (s.identifier?.toLowerCase().includes('tech') && sector.includes('tech')) ||
-            (s.identifier?.toLowerCase().includes('finan') && (sector.includes('finan') || sector.includes('bank'))) ||
-            (s.identifier?.toLowerCase().includes('energy') && sector.includes('energy')) ||
-            (s.identifier?.toLowerCase().includes('auto') && (sector.includes('auto') || sector.includes('motor')))
-          )
-        );
+        // P3.11: Canonical sector alias table for proper matching
+        const SECTOR_ALIASES = {
+          'information technology': ['information technology', 'technology', 'it', 'tech'],
+          'financial services': ['financial services', 'financials', 'finance', 'banking', 'bank', 'finan'],
+          'energy': ['energy'],
+          'automobile': ['automobile', 'automobiles', 'auto', 'automotive', 'motor'],
+          'real estate': ['real estate', 'realty'],
+          'fmcg': ['fmcg', 'consumer staples', 'consumer goods'],
+          'chemicals': ['chemicals', 'chemical'],
+          'aviation': ['aviation'],
+          'telecommunication': ['telecommunication', 'telecom', 'telco'],
+          'healthcare': ['healthcare', 'health care', 'pharma', 'pharmaceuticals'],
+          'metals': ['metals', 'steel', 'metals & mining', 'mining'],
+        };
+        const holdingSectorLc = sector.toLowerCase().trim();
+
+        const sectorShock = scenario.shocks.find((s) => {
+          if (s.target !== 'SECTOR') return false;
+          const shockIdLc = (s.identifier || '').toLowerCase().trim();
+          if (shockIdLc === holdingSectorLc) return true;
+          for (const [canonical, aliases] of Object.entries(SECTOR_ALIASES)) {
+            if (aliases.includes(shockIdLc) && (canonical === holdingSectorLc || aliases.includes(holdingSectorLc))) {
+              return true;
+            }
+          }
+          return false;
+        });
 
         if (sectorShock) {
           effectiveShockPercent = Number(sectorShock.shockPercent);
           shockRule = `Sector shock [${sectorShock.identifier}]: ${effectiveShockPercent > 0 ? '+' : ''}${effectiveShockPercent}%`;
         }
 
-        // 3. Broad Market Shock (scaled by holding beta if applicable, or base market shock)
+        // 3. Broad Market Shock (P3.11: market spillover blended)
         const marketShock = scenario.shocks.find((s) => s.target === 'MARKET');
         if (marketShock) {
           const mktShockVal = Number(marketShock.shockPercent);
-          // If sector shock also exists, blend in market spillover
           if (sectorShock) {
-            effectiveShockPercent += mktShockVal * 0.4;
-            shockRule += ` + Market spillover: ${(mktShockVal * 0.4).toFixed(1)}%`;
+            const spillover = mktShockVal * 0.4;
+            effectiveShockPercent += spillover;
+            shockRule += ` + Market spillover: ${(spillover > 0 ? '+' : '')}${spillover.toFixed(1)}%`;
           } else {
             effectiveShockPercent = mktShockVal;
             shockRule = `Systemic market shock: ${mktShockVal > 0 ? '+' : ''}${mktShockVal}%`;

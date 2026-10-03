@@ -235,4 +235,35 @@ export const RiskMath = {
       return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
     };
   },
+
+  /**
+   * Convert simple daily returns r_t to log returns x_t = ln(1 + r_t)
+   */
+  logReturns(simpleReturnsArr) {
+    if (!simpleReturnsArr || simpleReturnsArr.length === 0) return [];
+    return simpleReturnsArr.map((r) => Math.log(1 + (Number(r) || 0)));
+  },
+
+  /**
+   * Standard Normal PDF phi(x) = (1 / sqrt(2 * pi)) * exp(-0.5 * x^2)
+   */
+  normalPDF(x) {
+    return (1 / Math.sqrt(2 * Math.PI)) * Math.exp(-0.5 * x * x);
+  },
+
+  /**
+   * Standard Normal CDF Phi(x) via Error Function approximation
+   */
+  normalCDF(x) {
+    const t = 1 / (1 + 0.2316419 * Math.abs(x));
+    const d = 0.3989422804014327 * Math.exp((-x * x) / 2);
+    const prob =
+      d *
+      t *
+      (0.31938153 +
+        t *
+        (-0.356563782 +
+          t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))));
+    return x >= 0 ? 1 - prob : prob;
+  },
 };

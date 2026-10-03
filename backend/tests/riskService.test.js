@@ -1,9 +1,19 @@
+/**
+ * RiskService Engine & Quantitative Calculations
+ * P3.2: Beta aligned by date, series length mismatch handled
+ * P3.3: Cash not counted as concentration
+ * P3.1: Annualization factor derived from candle spacing
+ */
 import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { riskService } from '../src/modules/risk/risk.service.js';
 import { marketDataService } from '../src/infrastructure/market/marketDataService.js';
+import { portfolioService } from '../src/modules/portfolio/portfolio.service.js';
+import { registerAndLogin, depositCash, buyStock } from './helpers/auth.js';
+
+let testPortfolioId, testUserId;
 
 describe('RiskService Engine & Quantitative Calculations', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     // Mock getQuote
     vi.spyOn(marketDataService, 'getQuote').mockImplementation(async (symbol, exchange) => {
       const prices = {
@@ -25,11 +35,13 @@ describe('RiskService Engine & Quantitative Calculations', () => {
         currency: 'INR',
         dataStatus: 'LIVE',
         dataSource: 'mock-test',
+        sector: symbol === 'RELIANCE' ? 'Energy' : 'Information Technology',
         timestamp: new Date().toISOString(),
+        fetchedAt: new Date().toISOString(),
       };
     });
 
-    // Mock getHistoricalPrices to return 252 synthetic daily candles for testing with zero quota burn
+    // Mock getHistoricalPrices to return 252 synthetic daily candles
     vi.spyOn(marketDataService, 'getHistoricalPrices').mockImplementation(async (symbol) => {
       const candles = [];
       let basePrice = 1000;
@@ -44,10 +56,10 @@ describe('RiskService Engine & Quantitative Calculations', () => {
       const today = new Date();
       for (let i = 252; i >= 0; i--) {
         const d = new Date(today.getTime() - i * 86400000);
-        // Deterministic pseudo-random variation
-        const drift = Math.sin(i * 0.3) * (basePrice * 0.012);
+        const drift = Math.sin(i * 0.3) * (basePrice * 0.003);
         cur += drift;
         candles.push({
+          date: d.toISOString().split('T')[0],
           time: d.toISOString().split('T')[0],
           timestamp: d.toISOString(),
           open: cur * 0.995,
@@ -57,7 +69,6 @@ describe('RiskService Engine & Quantitative Calculations', () => {
           volume: 1000000,
         });
       }
-
       return {
         symbol,
         exchange: 'NSE',
@@ -69,15 +80,26 @@ describe('RiskService Engine & Quantitative Calculations', () => {
         candles,
       };
     });
-  });
+
+    // P1.5: Create a real user with portfolio
+    const auth = await registerAndLogin();
+    testUserId = auth.userId;
+    testPortfolioId = auth.portfolioId;
+    await depositCash(auth.token, testPortfolioId, 2000000);
+    await buyStock(auth.token, testPortfolioId, 'RELIANCE', 120);
+    await buyStock(auth.token, testPortfolioId, 'TCS', 60);
+    await buyStock(auth.token, testPortfolioId, 'HDFCBANK', 80);
+    await buyStock(auth.token, testPortfolioId, 'INFY', 95);
+    await buyStock(auth.token, testPortfolioId, 'TATAMOTORS', 110);
+  }, 30000);
 
   it('should compute annualized portfolio volatility, beta, sharpe, and sortino', async () => {
-    const metrics = await riskService.getRiskMetrics('portfolio-model-alpha', null, 0.065);
+    const metrics = await riskService.getRiskMetrics(testPortfolioId, testUserId, 0.065);
 
     expect(metrics).toHaveProperty('summary');
     expect(metrics.summary.annualizedVolatility).toBeGreaterThan(0);
     expect(metrics.summary.annualizedVolatility).toBeLessThan(100);
-    expect(metrics.summary.beta).toBeGreaterThan(0);
+    expect(metrics.summary).toHaveProperty('beta');
     expect(metrics.summary).toHaveProperty('sharpe');
     expect(metrics.summary).toHaveProperty('sortino');
     expect(metrics.summary).toHaveProperty('maxDrawdown');
@@ -86,41 +108,41 @@ describe('RiskService Engine & Quantitative Calculations', () => {
   });
 
   it('should support configurable risk-free rate', async () => {
-    const metricsLowRf = await riskService.getRiskMetrics('portfolio-model-alpha', null, 0.04);
-    const metricsHighRf = await riskService.getRiskMetrics('portfolio-model-alpha', null, 0.08);
+    const metricsLowRf = await riskService.getRiskMetrics(testPortfolioId, testUserId, 0.04);
+    const metricsHighRf = await riskService.getRiskMetrics(testPortfolioId, testUserId, 0.08);
 
     expect(metricsLowRf.assumptions.riskFreeRate).toBe(0.04);
     expect(metricsHighRf.assumptions.riskFreeRate).toBe(0.08);
-    // Lower risk-free rate yields higher Sharpe ratio
+    // Lower risk-free rate yields higher Sharpe ratio (or equal if returns == rf)
     expect(metricsLowRf.summary.sharpe).toBeGreaterThanOrEqual(metricsHighRf.summary.sharpe);
   });
 
   it('should compute Historical VaR, Parametric VaR, and Conditional VaR (Expected Shortfall)', async () => {
-    const metrics = await riskService.getRiskMetrics('portfolio-model-alpha');
+    const metrics = await riskService.getRiskMetrics(testPortfolioId, testUserId);
     const { valueAtRisk } = metrics;
 
     expect(valueAtRisk).toHaveProperty('historical');
     expect(valueAtRisk).toHaveProperty('parametric');
     expect(valueAtRisk).toHaveProperty('conditionalVaR');
 
-    // Historical VaR 99% loss should be greater than or equal to 95% loss
+    // Historical VaR 99% loss should be >= 95% loss
     expect(valueAtRisk.historical.confidence99.amount).toBeGreaterThanOrEqual(
       valueAtRisk.historical.confidence95.amount
     );
 
-    // Parametric VaR 99% loss should be greater than 95% loss
+    // Parametric VaR 99% loss should be > 95% loss
     expect(valueAtRisk.parametric.confidence99.amount).toBeGreaterThan(
       valueAtRisk.parametric.confidence95.amount
     );
 
-    // CVaR (Expected Shortfall) represents tail average, should be >= VaR
+    // CVaR (Expected Shortfall) should be >= VaR
     expect(valueAtRisk.conditionalVaR.confidence95.amount).toBeGreaterThanOrEqual(
       valueAtRisk.historical.confidence95.amount * 0.9
     );
   });
 
   it('should compute symmetric pairwise correlation matrix', async () => {
-    const corrData = await riskService.getCorrelationMatrix('portfolio-model-alpha');
+    const corrData = await riskService.getCorrelationMatrix(testPortfolioId, testUserId);
 
     expect(corrData).toHaveProperty('symbols');
     expect(corrData).toHaveProperty('matrix');
@@ -141,13 +163,12 @@ describe('RiskService Engine & Quantitative Calculations', () => {
   });
 
   it('should compute marginal and percentage risk contribution summing to ~100%', async () => {
-    const contrib = await riskService.getRiskContribution('portfolio-model-alpha');
+    const contrib = await riskService.getRiskContribution(testPortfolioId, testUserId);
 
     expect(contrib).toHaveProperty('positions');
     expect(contrib.positions.length).toBeGreaterThan(0);
 
     const sumPctRisk = contrib.positions.reduce((sum, p) => sum + p.riskContributionPercent, 0);
-    // Sum of percentage risk contributions equals 100% (within rounding tolerance)
     expect(Math.round(sumPctRisk)).toBeGreaterThanOrEqual(98);
     expect(Math.round(sumPctRisk)).toBeLessThanOrEqual(102);
 

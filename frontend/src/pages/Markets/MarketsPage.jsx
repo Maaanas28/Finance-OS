@@ -9,7 +9,7 @@ import { TopMovers } from '../../components/finance/TopMovers.jsx';
 import { api } from '../../services/api.js';
 import { FRONTEND_SECURITY_UNIVERSE, searchFrontendSecurities } from '../../data/securityUniverse.js';
 import { formatCurrency, formatPercent } from '../../utils/formatters.js';
-import { TrendingUp, TrendingDown, Search, BarChart2, Layers, Filter } from 'lucide-react';
+import { TrendingUp, TrendingDown, Search, BarChart2, Layers, Filter, Wallet, Coins } from 'lucide-react';
 
 export function MarketsPage() {
   const navigate = useNavigate();
@@ -24,7 +24,14 @@ export function MarketsPage() {
     staleTime: 0,
   });
 
+  const { data: summaryRes } = useQuery({
+    queryKey: ['portfolio-summary-markets'],
+    queryFn: () => api.getPortfolioSummary(),
+    refetchInterval: 3000,
+  });
+
   const quote = quoteRes?.data || null;
+  const cashBalance = summaryRes?.data?.cashBalance || 0;
 
   const sectors = ['ALL', 'Financials', 'Technology', 'Automotive', 'Energy', 'Healthcare', 'FMCG', 'Metals', 'Industrials'];
 
@@ -55,7 +62,12 @@ export function MarketsPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5 font-mono">
+          <div className="px-3 py-1.5 bg-[#0a101d] border border-[#1b273d] rounded flex items-center gap-2 text-xs">
+            <Wallet className="w-3.5 h-3.5 text-emerald-400" />
+            <span className="text-slate-400 text-[11px]">AVAILABLE CASH:</span>
+            <span className="font-bold text-white tabular-nums">{formatCurrency(cashBalance)}</span>
+          </div>
           <Badge variant="neutral" size="xs">
             {FRONTEND_SECURITY_UNIVERSE.length} SECURITIES INDEXED
           </Badge>
@@ -147,6 +159,15 @@ export function MarketsPage() {
             action={<DataStatusBadge status={quote?.dataStatus || 'HISTORICAL'} source={quote?.dataSource || 'yahoo'} />}
           >
             <div className="space-y-4 text-xs">
+              {/* Available Buying Power / Cash Reserve */}
+              <div className="p-3 bg-[#080c14] border border-[#182030] rounded-sm flex items-center justify-between font-mono text-xs">
+                <div className="flex items-center gap-2">
+                  <Coins className="w-4 h-4 text-emerald-400" />
+                  <span className="text-slate-400 text-[11px]">AVAILABLE BUYING POWER:</span>
+                </div>
+                <span className="font-bold text-emerald-400 tabular-nums">{formatCurrency(cashBalance)}</span>
+              </div>
+
               {/* Primary Quote Display */}
               <div className="p-4 bg-[#080c14] border border-[#182030] rounded-sm">
                 <div className="flex items-center justify-between">

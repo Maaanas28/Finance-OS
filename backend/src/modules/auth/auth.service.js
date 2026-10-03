@@ -7,33 +7,46 @@ import { logger } from '../../utils/logger.js';
 
 import { portfolioRepository } from '../../infrastructure/database/portfolioRepository.js';
 
+// P2.2: bcrypt rounds = 12
+const BCRYPT_ROUNDS = 12;
+
+// P2.2: Dummy hash used for constant-time comparison when user not found
+// Prevents timing attacks that reveal whether an email exists
+const DUMMY_HASH = '$2a$12$dummy.hash.for.constant.time.comparison.only.xxxxxxxxxxx';
+
 export class AuthService {
+  // P2.2: Pin algorithm to HS256
   generateToken(user) {
     return jwt.sign(
       {
         userId: user.id,
         email: user.email,
         role: user.role,
+        // P2.2: tokenVersion embedded in token
+        tokenVersion: user.tokenVersion || 0,
       },
       config.JWT_SECRET,
-      { expiresIn: config.JWT_EXPIRES_IN }
+      {
+        expiresIn: config.JWT_EXPIRES_IN,
+        algorithm: 'HS256',
+      }
     );
   }
 
-  async register({ email, password, fullName, role = 'USER' }) {
+  // P1.4: register always creates USER role; ignores any role in input
+  async register({ email, password, fullName }) {
     const existing = await userRepository.findByEmail(email);
     if (existing) {
       throw new ConflictError('A user with this email already exists');
     }
 
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
 
     const user = await userRepository.create({
       email,
       passwordHash,
       fullName,
-      role,
+      role: 'USER', // P1.4: Always USER, never trust client
     });
 
     // Create primary empty portfolio for the new user
@@ -58,14 +71,14 @@ export class AuthService {
 
   async login({ email, password }) {
     const user = await userRepository.findByEmail(email);
-    if (!user) {
-      logger.warn(`Failed login attempt for non-existent user: [${email}]`);
-      throw new UnauthorizedError('Invalid email or password');
-    }
 
-    const isValidPassword = await bcrypt.compare(password, user.passwordHash);
-    if (!isValidPassword) {
-      logger.warn(`Failed login attempt (bad password) for user: [${email}]`);
+    // P2.2: Always run bcrypt compare to prevent timing attacks
+    // If user not found, compare against dummy hash to consume same time
+    const hashToCompare = user ? user.passwordHash : DUMMY_HASH;
+    const isValidPassword = await bcrypt.compare(password, hashToCompare);
+
+    if (!user || !isValidPassword) {
+      logger.warn(`Failed login attempt for: [${email}]`);
       throw new UnauthorizedError('Invalid email or password');
     }
 
@@ -74,6 +87,7 @@ export class AuthService {
       email: user.email,
       fullName: user.fullName,
       role: user.role,
+      tokenVersion: user.tokenVersion || 0,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
@@ -90,6 +104,12 @@ export class AuthService {
       throw new NotFoundError('User profile not found');
     }
     return user;
+  }
+
+  // P2.2: Real server-side logout by incrementing tokenVersion
+  async logout(userId) {
+    await userRepository.incrementTokenVersion(userId);
+    logger.info(`User [${userId}] logged out; token version incremented`);
   }
 }
 
