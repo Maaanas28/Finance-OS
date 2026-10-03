@@ -168,9 +168,6 @@ export function TradeModal({
         payload.symbol = symbol.toUpperCase();
         payload.exchange = exchange;
         payload.quantity = Number(quantity);
-        payload.price = Number(price);
-        payload.fees = 20.0;
-        payload.assetClass = 'EQUITY';
       } else {
         payload.amount = Number(amount);
       }
@@ -315,15 +312,13 @@ export function TradeModal({
 
               <div>
                 <label className="block text-slate-400 uppercase tracking-wider mb-1">
-                  Limit/Exec Price (₹)
+                  Execution Price
                 </label>
                 <input
-                  type="number"
-                  min="0.05"
-                  step="0.05"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  className="w-full bg-[#080d1a] border border-[#1e293b] rounded px-3 py-2 text-white focus:outline-none focus:border-cyan-500"
+                  type="text"
+                  readOnly
+                  value={fetchingQuote ? 'Fetching...' : price ? `₹${Number(price).toFixed(2)} (Market)` : 'Market Price'}
+                  className="w-full bg-[#060912] border border-[#1e293b] rounded px-3 py-2 text-slate-400 cursor-not-allowed focus:outline-none"
                 />
               </div>
             </div>

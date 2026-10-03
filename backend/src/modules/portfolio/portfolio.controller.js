@@ -5,7 +5,7 @@ import { UnauthorizedError } from '../../utils/errors.js';
 
 export class PortfolioController {
   // P1.5: All methods require req.user (set by authMiddleware)
-  // No more 'user-default-analyst' fallbacks
+  // Anonymous guest access removed
 
   async getPortfolios(req, res, next) {
     try {

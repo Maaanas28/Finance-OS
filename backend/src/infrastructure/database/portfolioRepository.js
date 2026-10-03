@@ -18,7 +18,7 @@ class PortfolioRepository {
 
   seedModelPortfolio() {
     const defaultPortfolioId = 'portfolio-model-alpha';
-    const defaultUserId = 'user-default-analyst';
+    const defaultUserId = 'user-demo-analyst';
 
     const defaultPortfolio = {
       id: defaultPortfolioId,

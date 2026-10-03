@@ -2,7 +2,7 @@
  * Centralized API client for Finance OS
  */
 
-const API_BASE_URL = '/api/v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api/v1';
 
 export class ApiError extends Error {
   constructor(message, statusCode, code, details) {
@@ -22,24 +22,37 @@ async function request(endpoint, options = {}) {
     ...options.headers,
   };
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  const controller = new AbortController();
+  const timeoutMs = options.timeout || 15000;
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  const data = await response.json().catch(() => null);
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      ...options,
+      headers,
+      signal: options.signal || controller.signal,
+    });
 
-  if (!response.ok) {
-    const errorInfo = data?.error || {};
-    throw new ApiError(
-      errorInfo.message || `Request failed with status ${response.status}`,
-      response.status,
-      errorInfo.code || 'HTTP_ERROR',
-      errorInfo.details
-    );
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      if (response.status === 401) {
+        localStorage.removeItem('finance_os_token');
+        window.dispatchEvent(new CustomEvent('finance-os:unauthorized'));
+      }
+      const errorInfo = data?.error || {};
+      throw new ApiError(
+        errorInfo.message || `Request failed with status ${response.status}`,
+        response.status,
+        errorInfo.code || 'HTTP_ERROR',
+        errorInfo.details
+      );
+    }
+
+    return data;
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return data;
 }
 
 export const api = {
@@ -68,7 +81,7 @@ export const api = {
 
   // Portfolio Analytics & Holdings Engine
   getPortfolios: () => request('/portfolio/list', { method: 'GET' }),
-  createPortfolio: (data) => request('/portfolio/create', { method: 'POST', body: JSON.stringify(data) }),
+  createPortfolio: (data) => request('/portfolio', { method: 'POST', body: JSON.stringify(data) }),
   getPortfolioSummary: (portfolioId) =>
     request(`/portfolio/summary${portfolioId ? `?portfolioId=${encodeURIComponent(portfolioId)}` : ''}`, { method: 'GET' }),
   getHoldings: (portfolioId) =>

@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import request from 'supertest';
 import app from '../src/app.js';
 import { marketDataService } from '../src/infrastructure/market/marketDataService.js';
+import { config } from '../src/config/index.js';
 import { registerAndLogin, depositCash } from './helpers/auth.js';
 
 let token, portfolioId;
@@ -26,7 +27,11 @@ describe('Portfolio API Integration Tests', () => {
         'ITC': 460.00,
         'WIPRO': 524.10,
       };
-      const price = prices[symbol] || 1000.00;
+      const price = prices[symbol];
+      if (!price) {
+        const { NotFoundError } = await import('../src/utils/errors.js');
+        throw new NotFoundError(`Unknown symbol: ${symbol}`);
+      }
       return {
         symbol,
         exchange: exchange || 'NSE',
@@ -216,13 +221,68 @@ describe('Portfolio API Integration Tests', () => {
         .send({
           portfolioId,
           type: 'SELL',
-          symbol: 'NONEXISTENT',
+          symbol: 'TCS',
           quantity: 10,
         });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
       expect(res.body.error.message).toContain('Cannot SELL');
+    });
+
+    it('P1.2: Unknown symbol trade returns 404 in any mode', async () => {
+      const res = await request(app)
+        .post('/api/v1/portfolio/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          portfolioId,
+          type: 'BUY',
+          symbol: 'FAKECOXYZ99',
+          quantity: 10,
+        });
+
+      expect(res.status).toBe(404);
+    });
+
+    it('P1.2: SIMULATED quote blocks trade in auto mode, allowed in mock mode', async () => {
+      // In mock mode (test env default), trade is allowed
+      const mockRes = await request(app)
+        .post('/api/v1/portfolio/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          portfolioId,
+          type: 'BUY',
+          symbol: 'INFY',
+          quantity: 1,
+        });
+      expect(mockRes.status).toBe(201);
+
+      // Temporarily switch MARKET_DATA_MODE to 'auto'
+      const origMode = config.MARKET_DATA_MODE;
+      config.MARKET_DATA_MODE = 'auto';
+
+      // Mock marketDataService.getQuote to return SIMULATED dataStatus
+      vi.spyOn(marketDataService, 'getQuote').mockResolvedValueOnce({
+        symbol: 'INFY',
+        exchange: 'NSE',
+        price: 1800,
+        dataStatus: 'SIMULATED',
+        timestamp: new Date().toISOString(),
+      });
+
+      const autoRes = await request(app)
+        .post('/api/v1/portfolio/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          portfolioId,
+          type: 'BUY',
+          symbol: 'INFY',
+          quantity: 1,
+        });
+
+      config.MARKET_DATA_MODE = origMode;
+      expect(autoRes.status).toBe(400);
+      expect(autoRes.body.error.message).toContain('QUOTE_NOT_TRADEABLE');
     });
 
     it('should handle cash DEPOSIT', async () => {
@@ -300,6 +360,44 @@ describe('Portfolio API Integration Tests', () => {
       expect(res.body.data).toHaveProperty('benchmark');
       expect(res.body.data).toHaveProperty('performance');
       expect(Array.isArray(res.body.data.performance)).toBe(true);
+    });
+  });
+
+  describe('P1.2 Quote Tradeability Guard Tests (A5)', () => {
+    it('should reject trade when quote is SIMULATED in auto mode', async () => {
+      const originalMode = config.MARKET_DATA_MODE;
+      config.MARKET_DATA_MODE = 'auto';
+      vi.spyOn(marketDataService, 'getQuote').mockResolvedValueOnce({
+        symbol: 'RELIANCE',
+        price: 2980.50,
+        exchange: 'NSE',
+        isSimulated: true,
+        dataStatus: 'SIMULATED',
+        timestamp: new Date().toISOString()
+      });
+
+      const res = await request(app)
+        .post('/api/v1/portfolio/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ portfolioId, type: 'BUY', symbol: 'RELIANCE', quantity: 1 });
+
+      config.MARKET_DATA_MODE = originalMode;
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toContain('QUOTE_NOT_TRADEABLE');
+    });
+
+    it('should return 404 for unknown symbol in every mode', async () => {
+      vi.spyOn(marketDataService, 'getQuote').mockImplementationOnce(async () => {
+        const { NotFoundError } = await import('../src/utils/errors.js');
+        throw new NotFoundError('Unknown symbol INVALIDXYZ');
+      });
+
+      const res = await request(app)
+        .post('/api/v1/portfolio/transactions')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ portfolioId, type: 'BUY', symbol: 'INVALIDXYZ', quantity: 1 });
+
+      expect(res.status).toBe(404);
     });
   });
 });

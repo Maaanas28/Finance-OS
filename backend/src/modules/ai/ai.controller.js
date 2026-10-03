@@ -3,6 +3,7 @@ import { portfolioService } from '../portfolio/portfolio.service.js';
 import { riskService } from '../risk/risk.service.js';
 import { sendSuccess } from '../../utils/response.js';
 import { BadRequestError } from '../../utils/errors.js';
+import { logger } from '../../utils/logger.js';
 
 export class AIController {
   async getFinancialInsight(req, res, next) {
@@ -14,12 +15,16 @@ export class AIController {
       if (userId) {
         try {
           valuation = await portfolioService.getValuation(null, userId);
-          riskMetrics = await riskService.getSnapshot(null, userId);
-        } catch (e) {}
+          riskMetrics = await riskService.getRiskMetrics(null, userId);
+        } catch (e) {
+          logger.warn('Failed to fetch portfolio valuation or risk metrics for AI insight:', e.message);
+        }
       } else {
         try {
           valuation = await portfolioService.getValuation(null, null);
-        } catch (e) {}
+        } catch (e) {
+          logger.warn('Failed to fetch public valuation for AI insight:', e.message);
+        }
       }
 
       const insight = await aiProvider.generateFinancialInsight({
@@ -49,12 +54,16 @@ export class AIController {
       if (userId) {
         try {
           valuation = await portfolioService.getValuation(null, userId);
-          riskMetrics = await riskService.getSnapshot(null, userId);
-        } catch (e) {}
+          riskMetrics = await riskService.getRiskMetrics(null, userId);
+        } catch (e) {
+          logger.warn('Failed to fetch valuation or risk metrics for AI risk analysis:', e.message);
+        }
       } else {
         try {
           valuation = await portfolioService.getValuation(null, null);
-        } catch (e) {}
+        } catch (e) {
+          logger.warn('Failed to fetch public valuation for AI risk analysis:', e.message);
+        }
       }
 
       const analysis = await aiProvider.analyzePortfolioRisk({
@@ -88,12 +97,16 @@ export class AIController {
       if (userId) {
         try {
           valuation = await portfolioService.getValuation(null, userId);
-          riskMetrics = await riskService.getSnapshot(null, userId);
-        } catch (e) {}
+          riskMetrics = await riskService.getRiskMetrics(null, userId);
+        } catch (e) {
+          logger.warn('Failed to fetch valuation or risk metrics for AI query:', e.message);
+        }
       } else {
         try {
           valuation = await portfolioService.getValuation(null, null);
-        } catch (e) {}
+        } catch (e) {
+          logger.warn('Failed to fetch public valuation for AI query:', e.message);
+        }
       }
 
       const cleanPrompt = prompt.trim();
@@ -101,7 +114,6 @@ export class AIController {
         userPrompt: cleanPrompt,
         valuation,
         riskMetrics,
-        ...context,
       });
 
       const isLive = aiProvider.name === 'GrokAIProvider';

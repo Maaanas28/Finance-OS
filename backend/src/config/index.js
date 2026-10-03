@@ -30,7 +30,8 @@ const envSchema = z.object({
   TWELVE_DATA_DAILY_LIMIT: z.coerce.number().default(800),
   MARKET_DATA_PROVIDER: z.enum(['yahoo', 'mock', 'alphavantage', 'finnhub', 'twelvedata', 'bharatstock']).default('yahoo'),
   MARKET_DATA_API_KEY: z.string().default(''),
-  CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  CORS_ORIGIN: z.string().optional(),
+  CLIENT_URL: z.string().optional(),
   // News Intelligence Engine
   NEWS_PROVIDER: z.enum(['rss', 'mock']).default('rss'),
   NEWS_CACHE_TTL: z.coerce.number().default(300),
@@ -93,8 +94,13 @@ if (aiProvider === 'grok') {
   aiProvider = 'groq';
 }
 
-export const config = Object.freeze({
+const corsOrigin = data.CORS_ORIGIN || data.CLIENT_URL || 'http://localhost:5173';
+
+const configObj = {
   ...data,
+  CORS_ORIGIN: corsOrigin,
   JWT_SECRET: jwtSecret,
   AI_PROVIDER: aiProvider,
-});
+};
+
+export const config = data.NODE_ENV === 'test' ? configObj : Object.freeze(configObj);

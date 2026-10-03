@@ -18,8 +18,8 @@ class UserRepository {
           where: { email: normalizedEmail },
         });
       } catch (err) {
-        if (shouldFallbackToMemory(err)) {
-          logger.warn('DB findByEmail failed (connectivity), using in-memory fallback:', { error: err.message });
+        if (shouldFallbackToMemory(err) || (err.message && (err.message.includes('does not exist') || err.message.includes('Unknown argument')))) {
+          logger.warn('DB findByEmail failed, using in-memory fallback:', { error: err.message });
           this.useMemoryFallback = true;
         } else {
           // P1.7: domain errors (e.g. invalid query) propagate
@@ -53,8 +53,8 @@ class UserRepository {
           },
         });
       } catch (err) {
-        if (shouldFallbackToMemory(err)) {
-          logger.warn('DB findById failed (connectivity), using in-memory fallback:', { error: err.message });
+        if (shouldFallbackToMemory(err) || (err.message && (err.message.includes('does not exist') || err.message.includes('Unknown argument')))) {
+          logger.warn('DB findById failed, using in-memory fallback:', { error: err.message });
           this.useMemoryFallback = true;
         } else {
           throw err;

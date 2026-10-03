@@ -116,7 +116,7 @@ export class MarketDataService {
     return promise;
   }
 
-  // P1.3: applyLiveTickJitter removed — real provider prices returned unmodified.
+  // P1.3: Real provider prices returned unmodified.
   // Jitter may only be applied inside MockMarketDataProvider.
 
 

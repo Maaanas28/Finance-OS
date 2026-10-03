@@ -30,7 +30,35 @@ model User {
   portfolios      Portfolio[]
   stressScenarios StressScenario[]
 
+  userSettings UserSettings?
+  strategyRuns StrategyRun[]
+
   @@map("users")
+}
+
+model UserSettings {
+  id           String   @id @default(uuid())
+  userId       String   @unique @map("user_id")
+  riskFreeRate Decimal  @default(0.065) @db.Decimal(5, 4) @map("risk_free_rate")
+  currency     String   @default("INR")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
+}
+
+model StrategyRun {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  strategyId String   @map("strategy_id")
+  symbol     String
+  params     Json
+  summary    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("strategy_runs")
 }
 
 model Portfolio {
@@ -47,24 +75,26 @@ model Portfolio {
   transactions    Transaction[]
   user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId])
   @@map("portfolios")
 }
 
 model PortfolioHolding {
-  id             String    @id @default(uuid())
-  portfolioId    String    @map("portfolio_id")
-  symbol         String
-  exchange       String    @default("NSE")
-  name           String?
-  sector         String?
-  assetType      String    @default("EQUITY") @map("asset_type")
-  quantity       Decimal   @db.Decimal(18, 4)
-  averageBuyPrice Decimal  @db.Decimal(18, 4) @map("average_buy_price")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  portfolio      Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  id              String    @id @default(uuid())
+  portfolioId     String    @map("portfolio_id")
+  symbol          String
+  exchange        String    @default("NSE")
+  name            String?
+  sector          String?
+  assetType       String    @default("EQUITY") @map("asset_type")
+  quantity        Decimal   @db.Decimal(18, 4)
+  averageBuyPrice Decimal   @db.Decimal(18, 4) @map("average_buy_price")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  portfolio       Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, symbol, exchange])
+  @@index([portfolioId])
   @@map("portfolio_holdings")
 }
 
@@ -84,6 +114,7 @@ model Transaction {
   notes       String?
   portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
+  @@index([portfolioId, executedAt])
   @@map("transactions")
 }
 
