@@ -30,6 +30,7 @@ yarn-debug.log*
 yarn-error.log*
 scratch/
 backend/scratch/
+*.zip
 
 # Editor & OS files
 .vscode/

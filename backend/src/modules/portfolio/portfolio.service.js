@@ -518,21 +518,38 @@ export class PortfolioService {
         const nav = syncReturns.navSeries;
 
         // Slice by timeframe
+        const tf = (timeframe || '1M').toUpperCase();
         const now = Date.now();
         const msPerDay = 86400000;
-        const cutoffMs = timeframe === '1M' ? 30 * msPerDay
-          : timeframe === '3M' ? 90 * msPerDay
-          : timeframe === '6M' ? 180 * msPerDay
-          : timeframe === '1Y' ? 365 * msPerDay
+        const cutoffMs = tf === '1D' ? 1 * msPerDay
+          : tf === '1W' ? 7 * msPerDay
+          : tf === '1M' ? 30 * msPerDay
+          : tf === '3M' ? 90 * msPerDay
+          : tf === '6M' ? 180 * msPerDay
+          : tf === '1Y' ? 365 * msPerDay
           : 0; // ALL = no cutoff
 
-        const filtered = cutoffMs > 0
+        let filtered = cutoffMs > 0
           ? nav.filter((pt) => new Date(pt.date).getTime() >= now - cutoffMs)
           : nav;
 
+        // Ensure at least 2 data points for rendering a proper line chart
+        if (filtered.length < 2 && nav.length >= 2) {
+          filtered = nav.slice(-2);
+        } else if (filtered.length === 1) {
+          const firstPt = filtered[0];
+          const val = firstPt.nav ?? firstPt.value ?? currentVal;
+          const prevDate = new Date(new Date(firstPt.date).getTime() - (tf === '1D' ? 86400000 : 7 * 86400000))
+            .toISOString().split('T')[0];
+          filtered = [
+            { date: prevDate, nav: val },
+            firstPt,
+          ];
+        }
+
         const performance = filtered.map((pt) => ({
           time: pt.date,
-          value: pt.value,
+          value: Number((pt.nav ?? pt.value ?? 0).toFixed(2)),
         }));
 
         return {

@@ -9,17 +9,29 @@ import { BarChart2 } from 'lucide-react';
 // Format a date string for axis display
 function fmtAxisDate(isoStr, timeframe) {
   if (!isoStr) return '';
-  // For 1D the time field is already HH:mm
-  if (timeframe === '1D') return isoStr.substring(0, 5);
+  if (timeframe === '1D') {
+    return isoStr.includes('T') ? isoStr.substring(11, 16) : isoStr.substring(0, 5);
+  }
   const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return isoStr;
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
 // Format tooltip date more verbosely
 function fmtTooltipDate(isoStr, timeframe) {
   if (!isoStr) return '';
-  if (timeframe === '1D') return isoStr.substring(0, 5);
+  if (timeframe === '1D') {
+    if (isoStr.includes('T')) {
+      const d = new Date(isoStr);
+      return !isNaN(d.getTime()) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : isoStr.substring(11, 16);
+    }
+    return isoStr.substring(0, 5);
+  }
   const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return isoStr;
+  if (timeframe === '1W') {
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
 }
 
@@ -66,9 +78,7 @@ export function PerformanceChart() {
 
   // Market series from NIFTY candles - actual close prices
   const marketSeries = (historyRes?.data?.candles || []).map((c) => ({
-    time: c.timestamp
-      ? (timeframe === '1D' ? c.timestamp.substring(11, 16) : c.timestamp.split('T')[0])
-      : '',
+    time: c.timestamp || c.time || c.date || '',
     value: Number(c.close),
   }));
 

@@ -238,7 +238,11 @@ export class YahooFinanceProvider extends MarketDataProvider {
       '1d': { period1: new Date(now - 86400 * 1000), interval: '5m', queryRange: '1d' },
       '1w': { period1: new Date(now - 7 * 86400 * 1000), interval: '15m', queryRange: '5d' },
       '1m': { period1: new Date(now - 30 * 86400 * 1000), interval: '1d', queryRange: '1mo' },
-      '1y': { period1: new Date(now - 365 * 86400 * 1000), interval: '1wk', queryRange: '1y' },
+      '3m': { period1: new Date(now - 90 * 86400 * 1000), interval: '1d', queryRange: '3mo' },
+      '6m': { period1: new Date(now - 180 * 86400 * 1000), interval: '1d', queryRange: '6mo' },
+      '1y': { period1: new Date(now - 365 * 86400 * 1000), interval: '1d', queryRange: '1y' },
+      '5y': { period1: new Date(now - 5 * 365 * 86400 * 1000), interval: '1mo', queryRange: '5y' },
+      'all': { period1: new Date(now - 10 * 365 * 86400 * 1000), interval: '1mo', queryRange: 'max' },
     };
 
     const configRange = rangeMap[range.toLowerCase()] || rangeMap['1m'];

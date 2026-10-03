@@ -15,7 +15,8 @@ let userCounter = 0;
  */
 export async function registerAndLogin() {
   userCounter++;
-  const email = `test_user_${userCounter}_${Date.now()}@financeos.test`;
+  const rand = Math.random().toString(36).substring(2, 8);
+  const email = `test_user_${userCounter}_${Date.now()}_${rand}@financeos.test`;
   const password = 'TestPassword123';
   const fullName = `Test User ${userCounter}`;
 
