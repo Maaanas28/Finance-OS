@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider } from './context/AuthContext.jsx';
 import { AppRoutes } from './routes/AppRoutes.jsx';
+import { BootSequence } from './components/common/BootSequence.jsx';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,6 +19,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <BootSequence />
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <AppRoutes />
         </BrowserRouter>
