@@ -102,7 +102,7 @@ const aiLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   keyGenerator: (req) => req.user?.id || req.ip,
-  validate: { xForwardedForHeader: false },
+  validate: { xForwardedForHeader: false, default: false },
   skip: () => config.NODE_ENV !== 'production',
   handler: (req, res) => {
     res.status(429).json({
