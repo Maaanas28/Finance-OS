@@ -17,8 +17,9 @@ async function bootstrap() {
     logger.warn('PostgreSQL database not connected. Resilient repository fallback enabled.');
   }
 
-  const server = app.listen(config.PORT, () => {
-    logger.info(`Server successfully running on port [${config.PORT}]`);
+  const host = '0.0.0.0';
+  const server = app.listen(config.PORT, host, () => {
+    logger.info(`Server successfully running on ${host}:${config.PORT}`);
     logger.info(`Health check available at http://localhost:${config.PORT}/api/v1/health`);
   });
 

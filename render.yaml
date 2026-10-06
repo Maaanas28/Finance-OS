@@ -1,0 +1,49 @@
+# Render Blueprint configuration for Finance OS
+services:
+  # Backend Web Service
+  - type: web
+    name: finance-os-backend
+    env: node
+    plan: free
+    rootDir: backend
+    buildCommand: npm install && npx prisma generate
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 7d
+      - key: CORS_ORIGIN
+        sync: false
+      - key: TRUST_PROXY
+        value: "true"
+      - key: AI_PROVIDER
+        value: groq
+      - key: AI_API_KEY
+        sync: false
+      - key: MARKET_DATA_MODE
+        value: auto
+      - key: MARKET_DATA_PROVIDER
+        value: yahoo
+      - key: BHARATSTOCK_API_KEY
+        sync: false
+      - key: TWELVE_DATA_API_KEY
+        sync: false
+
+  # Frontend Static Site
+  - type: static
+    name: finance-os-frontend
+    rootDir: frontend
+    buildCommand: npm run build
+    publishDir: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
