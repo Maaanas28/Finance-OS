@@ -14,6 +14,7 @@ export function MetricCard({
   tooltip,
   icon: Icon,
   className = '',
+  onClick,
 }) {
   const isPositive = status === 'gain' || (changePercent && changePercent > 0);
   const isNegative = status === 'loss' || (changePercent && changePercent < 0);
@@ -27,7 +28,12 @@ export function MetricCard({
     : 'text-slate-400';
 
   return (
-    <div className={`bg-[#0d131f] border border-[#1b253b] hover:border-[#263553] p-4 rounded-md transition-all duration-200 ${className}`}>
+    <div
+      onClick={onClick}
+      className={`bg-[#0d131f] border border-[#1b253b] p-4 rounded-md transition-all duration-200 ${
+        onClick ? 'cursor-pointer hover:border-emerald-500/50 hover:bg-[#0c1424] shadow-xs hover:shadow-md' : 'hover:border-[#263553]'
+      } ${className}`}
+    >
       <div className="flex items-center justify-between gap-2 mb-2">
         <span className="text-[11px] uppercase tracking-wider font-semibold text-slate-400 font-mono flex items-center gap-1.5">
           {label}

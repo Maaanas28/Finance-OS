@@ -23,7 +23,7 @@ async function request(endpoint, options = {}) {
   };
 
   const controller = new AbortController();
-  const timeoutMs = options.timeout || 15000;
+  const timeoutMs = options.timeout || 45000;
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {

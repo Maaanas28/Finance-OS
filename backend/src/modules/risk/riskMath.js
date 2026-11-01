@@ -121,7 +121,8 @@ export const RiskMath = {
   },
 
   /**
-   * Cumulative Wealth & Drawdown Analysis
+   * Cumulative Wealth & Drawdown Analysis from daily returns
+   * Bounded rigorously in [-100%, 0%] for long-only portfolios.
    * @param {Array<{ date: string, return: number }>} returnSeries - Chronological daily returns
    */
   calculateDrawdowns(returnSeries) {
@@ -139,12 +140,15 @@ export const RiskMath = {
     const series = [];
 
     for (const pt of returnSeries) {
-      currentWealth *= 1 + (Number(pt.return) || 0);
+      const r = Number(pt.return) || 0;
+      // In a long-only cash/equity portfolio, wealth cannot drop below 0
+      currentWealth = Math.max(0, currentWealth * (1 + r));
       if (currentWealth > peak) {
         peak = currentWealth;
         peakDate = pt.date;
       }
-      const dd = (currentWealth - peak) / peak; // negative or zero
+      // Drawdown bounded in [-1.0, 0.0]
+      const dd = peak > 0 ? Math.max(-1.0, Math.min(0, (currentWealth - peak) / peak)) : 0;
       if (dd < maxDrawdown) {
         maxDrawdown = dd;
         maxDdPeakDate = peakDate;
@@ -160,6 +164,51 @@ export const RiskMath = {
 
     return {
       maxDrawdown: this.round(maxDrawdown * 100, 2), // percentage e.g. -14.25
+      maxDrawdownDecimal: this.round(maxDrawdown, 4),
+      peakDate: maxDdPeakDate,
+      troughDate: maxDdTroughDate,
+      series,
+    };
+  },
+
+  /**
+   * Drawdown Analysis directly from portfolio valuation equity curve
+   * @param {Array<{ date: string, value?: number, nav?: number }>} valuationSeries
+   */
+  calculateDrawdownsFromValuations(valuationSeries) {
+    if (!valuationSeries || valuationSeries.length === 0) {
+      return { maxDrawdown: 0, peakDate: null, troughDate: null, series: [] };
+    }
+
+    let peak = Math.max(0, Number(valuationSeries[0]?.value ?? valuationSeries[0]?.nav ?? 0));
+    let peakDate = valuationSeries[0]?.date || null;
+    let maxDrawdown = 0;
+    let maxDdPeakDate = peakDate;
+    let maxDdTroughDate = peakDate;
+    const series = [];
+
+    for (const pt of valuationSeries) {
+      const val = Math.max(0, Number(pt.value ?? pt.nav ?? 0));
+      if (val > peak) {
+        peak = val;
+        peakDate = pt.date;
+      }
+      const dd = peak > 0 ? Math.max(-1.0, Math.min(0, (val - peak) / peak)) : 0;
+      if (dd < maxDrawdown) {
+        maxDrawdown = dd;
+        maxDdPeakDate = peakDate;
+        maxDdTroughDate = pt.date;
+      }
+      series.push({
+        date: pt.date,
+        value: this.round(val, 2),
+        drawdown: this.round(dd * 100, 2),
+        peak: this.round(peak, 2),
+      });
+    }
+
+    return {
+      maxDrawdown: this.round(maxDrawdown * 100, 2),
       maxDrawdownDecimal: this.round(maxDrawdown, 4),
       peakDate: maxDdPeakDate,
       troughDate: maxDdTroughDate,
@@ -241,7 +290,7 @@ export const RiskMath = {
    */
   logReturns(simpleReturnsArr) {
     if (!simpleReturnsArr || simpleReturnsArr.length === 0) return [];
-    return simpleReturnsArr.map((r) => Math.log(1 + (Number(r) || 0)));
+    return simpleReturnsArr.map((r) => Math.log(Math.max(1e-7, 1 + (Number(r) || 0))));
   },
 
   /**

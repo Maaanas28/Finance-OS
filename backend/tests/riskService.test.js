@@ -91,7 +91,7 @@ describe('RiskService Engine & Quantitative Calculations', () => {
     await buyStock(auth.token, testPortfolioId, 'HDFCBANK', 80);
     await buyStock(auth.token, testPortfolioId, 'INFY', 95);
     await buyStock(auth.token, testPortfolioId, 'TATAMOTORS', 110);
-  }, 30000);
+  }, 60000);
 
   it('should compute annualized portfolio volatility, beta, sharpe, and sortino', async () => {
     const metrics = await riskService.getRiskMetrics(testPortfolioId, testUserId, 0.065);

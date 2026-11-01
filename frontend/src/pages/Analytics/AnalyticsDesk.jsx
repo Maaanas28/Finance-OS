@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button.jsx';
 import { DataStatusBadge } from '../../components/ui/DataStatusBadge.jsx';
 import { api } from '../../services/api.js';
 import { formatCurrency, formatPercent } from '../../utils/formatters.js';
+import { RiskMetricModal } from '../../components/finance/RiskMetricModal.jsx';
 import {
   BarChart3,
   TrendingUp,
@@ -28,6 +29,7 @@ export function AnalyticsDesk() {
   const [performanceSeries, setPerformanceSeries] = useState(null);
   const [attribution, setAttribution] = useState(null);
   const [ratios, setRatios] = useState(null);
+  const [selectedMetric, setSelectedMetric] = useState(null);
   const [loading, setLoading] = useState(true);
 
   const loadData = useCallback(async () => {
@@ -185,6 +187,13 @@ export function AnalyticsDesk() {
           badgeText="Risk Adjusted"
           badgeVariant="gain"
           icon={ShieldCheck}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'sharpe',
+              value: `Sharpe: ${typeof r?.sharpe === 'number' ? r.sharpe.toFixed(2) : '0.00'} | Sortino: ${typeof r?.sortino === 'number' ? r.sortino.toFixed(2) : '0.00'}`,
+              status: 'Risk Adjusted',
+            })
+          }
         />
 
         {/* Volatility & Beta */}
@@ -195,6 +204,13 @@ export function AnalyticsDesk() {
           badgeText="Sensitivity"
           badgeVariant="neutral"
           icon={Activity}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'volatility',
+              value: `Vol: ${r?.annualizedVolatility || '0.0'}% | Beta: ${typeof r?.beta === 'number' ? r.beta.toFixed(2) : '0.00'}`,
+              status: 'Sensitivity',
+            })
+          }
         />
 
         {/* Maximum Drawdown */}
@@ -205,6 +221,13 @@ export function AnalyticsDesk() {
           badgeText="Underwater"
           badgeVariant="loss"
           icon={TrendingDown}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'drawdown',
+              value: `${r?.maxDrawdown !== undefined ? r.maxDrawdown : '0.0'}%`,
+              status: 'Underwater',
+            })
+          }
         />
       </div>
 
@@ -393,6 +416,15 @@ export function AnalyticsDesk() {
           </div>
         </div>
       </div>
+
+      {/* Interactive Risk Metric Explainer Modal */}
+      <RiskMetricModal
+        isOpen={!!selectedMetric}
+        onClose={() => setSelectedMetric(null)}
+        metricId={selectedMetric?.id}
+        currentValue={selectedMetric?.value}
+        currentStatus={selectedMetric?.status}
+      />
     </div>
   );
 }

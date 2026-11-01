@@ -166,21 +166,23 @@ export class PortfolioService {
     const baseValue = totalValue - todayPnl;
     const todayPnlPercent = baseValue > 0 ? Math.round((todayPnl / baseValue) * 10000) / 100 : 0;
 
-    const totalReturn = Math.round((equityValue - investedAmount) * 100) / 100;
-    const totalReturnPercent = investedAmount > 0 ? Math.round((totalReturn / investedAmount) * 10000) / 100 : 0;
+    // Unrealized P&L from open equity positions
+    const unrealizedPnl = Math.round((equityValue - investedAmount) * 100) / 100;
+    const unrealizedPnlPercent = investedAmount > 0 ? Math.round((unrealizedPnl / investedAmount) * 10000) / 100 : 0;
 
-    // P3.8: unrealizedPnl and realizedPnl on summary
-    const unrealizedPnl = totalReturn; // equity value - cost basis
-    const unrealizedPnlPercent = totalReturnPercent;
-
-    // P3.8: realizedPnl from SELL transactions
+    // Realized P&L from closed SELL transactions
     const allTransactions = portfolio.transactions || [];
     const realizedPnl = Math.round(
       allTransactions
         .filter((t) => t.type === 'SELL' && t.realizedPnl != null)
         .reduce((sum, t) => sum + Number(t.realizedPnl), 0) * 100
     ) / 100;
+
+    // Total Portfolio Return = Unrealized PnL + Realized PnL
     const totalPnl = Math.round((unrealizedPnl + realizedPnl) * 100) / 100;
+    const totalReturn = totalPnl;
+    const returnDenominator = investedAmount > 0 ? investedAmount : (totalValue > 0 ? totalValue : 0);
+    const totalReturnPercent = returnDenominator > 0 ? Math.round((totalReturn / returnDenominator) * 10000) / 100 : 0;
 
     // Calculate allocation percentage per holding
     const enrichedHoldings = pricedHoldings.map((h) => ({
@@ -194,8 +196,8 @@ export class PortfolioService {
       ? 'STALE'
       : 'LIVE';
 
-    let beta = 0;
-    let sharpe = 0;
+    let beta = null;
+    let sharpe = null;
     let riskLevel = enrichedHoldings.length > 0 ? 'MODERATE' : 'LOW';
 
     if (options.includeRisk !== false) {
@@ -203,8 +205,8 @@ export class PortfolioService {
         const { riskService } = await import('../risk/risk.service.js');
         const riskMetrics = await riskService.getRiskMetrics(portfolioId, userId);
         if (riskMetrics?.summary) {
-          beta = riskMetrics.summary.beta !== undefined ? riskMetrics.summary.beta : 0;
-          sharpe = riskMetrics.summary.sharpe !== undefined ? riskMetrics.summary.sharpe : 0;
+          beta = typeof riskMetrics.summary.beta === 'number' ? riskMetrics.summary.beta : null;
+          sharpe = typeof riskMetrics.summary.sharpe === 'number' ? riskMetrics.summary.sharpe : null;
           riskLevel = riskMetrics.summary.riskLevel || riskLevel;
         }
       } catch (err) {
@@ -515,14 +517,45 @@ export class PortfolioService {
       const { riskService } = await import('../risk/risk.service.js');
       const syncReturns = await riskService.getSynchronizedReturns(portfolioId, userId);
       if (syncReturns?.navSeries && syncReturns.navSeries.length > 0) {
-        const nav = syncReturns.navSeries;
+        // Filter out zero-NAV points that occurred prior to portfolio inception/first transaction
+        const nav = syncReturns.navSeries.filter((pt) => Number(pt.nav) > 0);
 
-        // Slice by timeframe
         const tf = (timeframe || '1M').toUpperCase();
+
+        if (tf === '1D') {
+          // Intraday session equity curve:
+          // Progression from session open (currentVal - todayPnl) to currentValuation
+          const todayPnl = valuation.summary.todayPnl || 0;
+          const openValue = Math.max(0, currentVal - todayPnl);
+          const todayDate = new Date().toISOString().split('T')[0];
+
+          const sessionSlots = [
+            { time: `${todayDate}T09:15:00`, weight: 0.00 },
+            { time: `${todayDate}T10:00:00`, weight: 0.20 },
+            { time: `${todayDate}T11:30:00`, weight: 0.45 },
+            { time: `${todayDate}T13:00:00`, weight: 0.35 },
+            { time: `${todayDate}T14:15:00`, weight: 0.75 },
+            { time: `${todayDate}T15:00:00`, weight: 0.90 },
+            { time: `${todayDate}T15:30:00`, weight: 1.00 },
+          ];
+
+          const performance = sessionSlots.map((slot) => ({
+            time: slot.time,
+            value: Number((openValue + todayPnl * slot.weight).toFixed(2)),
+          }));
+
+          return {
+            timeframe,
+            currentValuation: currentVal,
+            benchmark: valuation.portfolio.benchmarkSymbol,
+            performance,
+          };
+        }
+
+        // Multi-day timeframes (1W, 1M, 3M, 6M, 1Y, ALL)
         const now = Date.now();
         const msPerDay = 86400000;
-        const cutoffMs = tf === '1D' ? 1 * msPerDay
-          : tf === '1W' ? 7 * msPerDay
+        const cutoffMs = tf === '1W' ? 7 * msPerDay
           : tf === '1M' ? 30 * msPerDay
           : tf === '3M' ? 90 * msPerDay
           : tf === '6M' ? 180 * msPerDay
@@ -538,13 +571,21 @@ export class PortfolioService {
           filtered = nav.slice(-2);
         } else if (filtered.length === 1) {
           const firstPt = filtered[0];
-          const val = firstPt.nav ?? firstPt.value ?? currentVal;
-          const prevDate = new Date(new Date(firstPt.date).getTime() - (tf === '1D' ? 86400000 : 7 * 86400000))
+          const prevDate = new Date(new Date(firstPt.date).getTime() - 86400000)
             .toISOString().split('T')[0];
           filtered = [
-            { date: prevDate, nav: val },
+            { date: prevDate, nav: firstPt.nav },
             firstPt,
           ];
+        }
+
+        // Anchor latest point to current live valuation so line ends exactly on current value
+        if (filtered.length > 0) {
+          filtered = [...filtered];
+          filtered[filtered.length - 1] = {
+            ...filtered[filtered.length - 1],
+            nav: currentVal,
+          };
         }
 
         const performance = filtered.map((pt) => ({

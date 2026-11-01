@@ -5,6 +5,7 @@ import { Button } from '../../components/ui/Button.jsx';
 import { DataStatusBadge } from '../../components/ui/DataStatusBadge.jsx';
 import { api } from '../../services/api.js';
 import { formatCurrency, formatPercent } from '../../utils/formatters.js';
+import { RiskMetricModal } from '../../components/finance/RiskMetricModal.jsx';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -38,6 +39,7 @@ export function RiskCenter() {
   const [loading, setLoading] = useState(true);
   const [stressLoading, setStressLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('stress'); // 'stress' | 'correlation' | 'contribution' | 'drawdown'
+  const [selectedMetric, setSelectedMetric] = useState(null);
 
   const loadData = useCallback(async () => {
     setLoading(true);
@@ -194,6 +196,13 @@ export function RiskCenter() {
           badgeText={m?.riskLevel || 'CONSERVATIVE'}
           badgeVariant={m?.compositeScore > 65 ? 'loss' : m?.compositeScore > 40 ? 'warn' : 'gain'}
           icon={ShieldAlert}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'composite',
+              value: `${m?.compositeScore !== undefined ? m.compositeScore : 0} / 100`,
+              status: m?.riskLevel || 'CONSERVATIVE',
+            })
+          }
         />
 
         {/* Volatility */}
@@ -204,6 +213,13 @@ export function RiskCenter() {
           badgeText={`${metrics?.observationPeriodDays || 0} Sessions`}
           badgeVariant="neutral"
           icon={Activity}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'volatility',
+              value: `${m?.annualizedVolatility !== undefined ? m.annualizedVolatility : '0.0'}%`,
+              status: m?.annualizedVolatility > 20 ? 'ELEVATED' : 'STABLE',
+            })
+          }
         />
 
         {/* Beta */}
@@ -214,6 +230,13 @@ export function RiskCenter() {
           badgeText={m?.beta > 1.2 ? 'Aggressive' : 'Defensive'}
           badgeVariant={m?.beta > 1.2 ? 'warn' : 'gain'}
           icon={Zap}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'beta',
+              value: m?.beta !== undefined ? (typeof m.beta === 'number' ? m.beta.toFixed(2) : String(m.beta)) : '0.00',
+              status: m?.beta > 1.2 ? 'Aggressive' : 'Defensive',
+            })
+          }
         />
 
         {/* Sharpe & Sortino */}
@@ -224,6 +247,13 @@ export function RiskCenter() {
           badgeText="Risk-Adjusted"
           badgeVariant="gain"
           icon={ShieldCheck}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'sharpe',
+              value: `Sharpe: ${typeof m?.sharpe === 'number' ? m.sharpe.toFixed(2) : '0.00'} | Sortino: ${typeof m?.sortino === 'number' ? m.sortino.toFixed(2) : '0.00'}`,
+              status: 'Risk-Adjusted',
+            })
+          }
         />
 
         {/* Max Drawdown */}
@@ -234,6 +264,13 @@ export function RiskCenter() {
           badgeText="Underwater"
           badgeVariant="loss"
           icon={TrendingDown}
+          onClick={() =>
+            setSelectedMetric({
+              id: 'drawdown',
+              value: `${m?.maxDrawdown !== undefined ? m.maxDrawdown : '0.0'}%`,
+              status: 'Underwater',
+            })
+          }
         />
       </div>
 
@@ -822,6 +859,15 @@ export function RiskCenter() {
           </div>
         </div>
       )}
+
+      {/* Interactive Risk Metric Explainer Modal */}
+      <RiskMetricModal
+        isOpen={!!selectedMetric}
+        onClose={() => setSelectedMetric(null)}
+        metricId={selectedMetric?.id}
+        currentValue={selectedMetric?.value}
+        currentStatus={selectedMetric?.status}
+      />
     </div>
   );
 }

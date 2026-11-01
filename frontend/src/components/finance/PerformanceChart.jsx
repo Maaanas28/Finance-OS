@@ -10,10 +10,24 @@ import { BarChart2 } from 'lucide-react';
 function fmtAxisDate(isoStr, timeframe) {
   if (!isoStr) return '';
   if (timeframe === '1D') {
-    return isoStr.includes('T') ? isoStr.substring(11, 16) : isoStr.substring(0, 5);
+    if (isoStr.includes('T')) {
+      return isoStr.substring(11, 16);
+    }
+    if (isoStr.includes(' ')) {
+      const parts = isoStr.split(' ');
+      if (parts[1]) return parts[1].substring(0, 5);
+    }
+    const d = new Date(isoStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+    }
+    return isoStr;
   }
   const d = new Date(isoStr);
   if (isNaN(d.getTime())) return isoStr;
+  if (timeframe === '1Y' || timeframe === 'ALL') {
+    return d.toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
+  }
   return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
 }
 
@@ -21,34 +35,63 @@ function fmtAxisDate(isoStr, timeframe) {
 function fmtTooltipDate(isoStr, timeframe) {
   if (!isoStr) return '';
   if (timeframe === '1D') {
-    if (isoStr.includes('T')) {
+    if (isoStr.includes('T') || isoStr.includes(' ')) {
       const d = new Date(isoStr);
-      return !isNaN(d.getTime()) ? d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : isoStr.substring(11, 16);
+      if (!isNaN(d.getTime())) {
+        return `${d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}, ${d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' })}`;
+      }
+      return isoStr;
     }
-    return isoStr.substring(0, 5);
+    const d = new Date(isoStr);
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    }
+    return isoStr;
   }
   const d = new Date(isoStr);
   if (isNaN(d.getTime())) return isoStr;
-  if (timeframe === '1W') {
-    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+// Smart Y-axis tick formatter avoiding duplicate/rounded labels
+function formatChartTick(val, range, isMarket) {
+  if (!Number.isFinite(val)) return '';
+  if (isMarket) {
+    if (range < 10) return val.toFixed(2);
+    if (range < 100) return val.toFixed(1);
+    return Number(val).toLocaleString('en-IN', { maximumFractionDigits: 0 });
   }
-  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: '2-digit' });
+
+  // Portfolio currency formatting
+  if (val >= 1e7) {
+    const cr = val / 1e7;
+    const decimals = range < 1e6 ? 3 : range < 5e6 ? 2 : 1;
+    return `₹${cr.toFixed(decimals)}Cr`;
+  }
+  if (val >= 1e5) {
+    if (range < 50000) {
+      return `₹${Math.round(val).toLocaleString('en-IN')}`;
+    }
+    const l = val / 1e5;
+    const decimals = range < 2e5 ? 2 : 1;
+    return `₹${l.toFixed(decimals)}L`;
+  }
+  if (val >= 1e3) {
+    if (range < 1000) {
+      return `₹${val.toFixed(0)}`;
+    }
+    return `₹${Math.round(val).toLocaleString('en-IN')}`;
+  }
+  return `₹${val.toFixed(0)}`;
 }
 
 /**
  * PerformanceChart Component
  * 
- * DATA PROVENANCE & DUAL-MODE CHART ARCHITECTURE:
- * 1. Portfolio Mode ('portfolio'):
- *    - Fetches the user's historical portfolio valuation curve from `api.getPortfolioPerformance(null, timeframe)`.
- *    - Data Source: Authenticated user transaction ledger & historical mark-to-market valuations.
- *    - Empty State: If the portfolio has ₹0 valuation or zero trade transactions, an honest empty state
- *      ("No Portfolio History") is rendered. No fake/interpolated data is generated for zero-balance users.
- * 
- * 2. NIFTY 50 Mode ('nifty'):
- *    - Fetches real historical benchmark close prices from `api.getHistoricalPrices('NIFTY 50', { timeframe })`.
- *    - Data Source: Yahoo Finance API (`^NSEI` symbol).
- *    - Data Status: Displayed via `DataStatusBadge` showing real provider metadata (DELAYED / HISTORICAL).
+ * High-precision institutional quantitative equity curve chart:
+ * 1. Portfolio Mode: Live valuation curve synchronized with trades & mark-to-market.
+ * 2. NIFTY 50 Mode: Real benchmark candles from Yahoo Finance.
+ * 3. Dynamic axis scales, non-colliding tick formatting, and responsive crosshair.
  */
 export function PerformanceChart() {
   const [timeframe, setTimeframe] = useState('1M');
@@ -104,14 +147,15 @@ export function PerformanceChart() {
   const values = hasData ? series.map((d) => d.value) : [];
   const minValue = hasData ? Math.min(...values) : 0;
   const maxValue = hasData ? Math.max(...values) : 1;
-  const yPad = Math.abs(maxValue - minValue) * 0.05 || 1;
+  const actualRange = maxValue - minValue;
+  const yPad = Math.max(actualRange * 0.08, actualRange === 0 ? 100 : 5);
   const yMin = minValue - yPad;
   const yMax = maxValue + yPad;
   const yRange = yMax - yMin || 1;
 
   const W = 740;
   const H = 250;
-  const PAD = { top: 18, right: 72, bottom: 32, left: 10 };
+  const PAD = { top: 18, right: 85, bottom: 32, left: 16 };
   const cW = W - PAD.left - PAD.right;
   const cH = H - PAD.top - PAD.bottom;
 
@@ -143,16 +187,50 @@ export function PerformanceChart() {
   // Display point for header telemetry
   const displayPt = hoveredPoint || (points.length > 0 ? points[points.length - 1] : null);
 
+  // Performance telemetry calculations
+  const firstPtVal = points.length > 0 ? points[0].value : 0;
+  const targetPtVal = displayPt ? displayPt.value : 0;
+  const periodDiff = targetPtVal - firstPtVal;
+  const periodDiffPct = firstPtVal > 0 ? (periodDiff / firstPtVal) * 100 : 0;
+  const isHoverPositive = periodDiff >= 0;
+
   // Y-axis labels: 5 evenly-spaced price levels
   const yTicks = [0, 0.25, 0.5, 0.75, 1].map((ratio) => ({
     y: PAD.top + cH * (1 - ratio),
     value: yMin + yRange * ratio,
   }));
 
-  // X-axis labels: show first, middle, last
-  const xTickIndices = points.length > 2
-    ? [0, Math.floor(points.length / 2), points.length - 1]
-    : [0, points.length - 1].filter((i) => i < points.length);
+  // X-axis labels: show 5 evenly spaced ticks across series
+  const xTickIndices = [];
+  if (points.length <= 5) {
+    for (let i = 0; i < points.length; i++) xTickIndices.push(i);
+  } else {
+    const numTicks = 5;
+    for (let k = 0; k < numTicks; k++) {
+      const idx = Math.round((k / (numTicks - 1)) * (points.length - 1));
+      if (!xTickIndices.includes(idx)) {
+        xTickIndices.push(idx);
+      }
+    }
+  }
+
+  // Crosshair mouse movement tracker across SVG
+  const handleSvgMouseMove = (e) => {
+    if (!points.length) return;
+    const svgRect = e.currentTarget.getBoundingClientRect();
+    const mouseX = ((e.clientX - svgRect.left) / svgRect.width) * W;
+    
+    let closest = points[0];
+    let minDist = Math.abs(points[0].x - mouseX);
+    for (let i = 1; i < points.length; i++) {
+      const dist = Math.abs(points[i].x - mouseX);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = points[i];
+      }
+    }
+    setHoveredPoint(closest);
+  };
 
   return (
     <ChartContainer
@@ -190,28 +268,24 @@ export function PerformanceChart() {
     >
       {/* Hover telemetry header */}
       {hasData && displayPt && (
-        <div className="mb-2 px-2 py-1.5 bg-[#06090e] border border-[#162238] rounded text-[11px] font-mono flex items-center gap-4 flex-wrap">
+        <div className="mb-2 px-2.5 py-1.5 bg-[#06090e] border border-[#162238] rounded text-[11px] font-mono flex items-center gap-4 flex-wrap">
           <span className="text-slate-400">
-            Date: <strong className="text-slate-200">{fmtTooltipDate(displayPt.time, timeframe)}</strong>
+            {hoveredPoint ? 'Hover:' : 'Latest:'} <strong className="text-slate-200">{fmtTooltipDate(displayPt.time, timeframe)}</strong>
           </span>
           <span className="text-slate-400">
-            {isMarket ? 'Close:' : 'Value:'}
-            {' '}
+            {isMarket ? 'Close:' : 'Valuation:'}{' '}
             <strong className="text-white tabular-nums">
               {isMarket ? formatNumber(displayPt.value) : formatCurrency(displayPt.value)}
             </strong>
           </span>
-          {hasData && (
-            <span className={`ml-auto font-semibold tabular-nums ${isPositiveSeries ? 'text-emerald-400' : 'text-rose-400'}`}>
-              {isMarket
-                ? `${isPositiveSeries ? '+' : ''}${((points[points.length - 1].value - points[0].value) / points[0].value * 100).toFixed(2)}%`
-                : (currentValuation > 0
-                  ? formatCurrency(currentValuation)
-                  : '₹0 · Start trading'
-                )
-              }
-            </span>
-          )}
+          <span className={`ml-auto font-semibold tabular-nums text-xs px-2 py-0.5 rounded border ${
+            isHoverPositive
+              ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+              : 'text-rose-400 bg-rose-500/10 border-rose-500/20'
+          }`}>
+            {isHoverPositive ? '+' : ''}{periodDiffPct.toFixed(2)}%
+            {!isMarket && ` (${isHoverPositive ? '+' : ''}${formatCurrency(periodDiff)})`}
+          </span>
         </div>
       )}
 
@@ -249,6 +323,7 @@ export function PerformanceChart() {
             viewBox={`0 0 ${W} ${H}`}
             className="w-full overflow-visible cursor-crosshair select-none"
             style={{ height: '260px' }}
+            onMouseMove={handleSvgMouseMove}
             onMouseLeave={() => setHoveredPoint(null)}
           >
             <defs>
@@ -275,20 +350,13 @@ export function PerformanceChart() {
                   strokeWidth="0.8"
                 />
                 <text
-                  x={W - PAD.right + 6}
+                  x={W - PAD.right + 8}
                   y={tick.y + 3.5}
                   fill="#64748b"
                   fontSize="10"
                   fontFamily="JetBrains Mono, monospace"
                 >
-                  {isMarket
-                    ? Number(tick.value).toLocaleString('en-IN', { maximumFractionDigits: 0 })
-                    : tick.value >= 1e7
-                      ? `₹${(tick.value / 1e7).toFixed(1)}Cr`
-                      : tick.value >= 1e5
-                        ? `₹${(tick.value / 1e5).toFixed(1)}L`
-                        : `₹${tick.value.toFixed(0)}`
-                  }
+                  {formatChartTick(tick.value, yRange, isMarket)}
                 </text>
               </g>
             ))}
@@ -321,7 +389,7 @@ export function PerformanceChart() {
               />
             )}
 
-            {/* Hover crosshair vertical line */}
+            {/* Hover crosshair vertical line and point */}
             {hoveredPoint && (
               <g>
                 <line
@@ -345,23 +413,14 @@ export function PerformanceChart() {
               </g>
             )}
 
-            {/* Invisible hover hitboxes per data point */}
-            {points.map((pt) => (
-              <rect
-                key={pt.index}
-                x={pt.x - cW / (points.length * 2)}
-                y={PAD.top}
-                width={cW / Math.max(1, points.length)}
-                height={cH}
-                fill="transparent"
-                onMouseEnter={() => setHoveredPoint(pt)}
-              />
-            ))}
-
             {/* X-axis date labels */}
-            {xTickIndices.map((i) => {
+            {xTickIndices.map((i, tickIdx) => {
               const pt = points[i];
               if (!pt) return null;
+              const isFirst = tickIdx === 0;
+              const isLast = tickIdx === xTickIndices.length - 1;
+              const textAnchor = isFirst ? 'start' : isLast ? 'end' : 'middle';
+
               return (
                 <text
                   key={i}
@@ -370,7 +429,7 @@ export function PerformanceChart() {
                   fill="#64748b"
                   fontSize="10"
                   fontFamily="JetBrains Mono, monospace"
-                  textAnchor="middle"
+                  textAnchor={textAnchor}
                 >
                   {fmtAxisDate(pt.time, timeframe)}
                 </text>

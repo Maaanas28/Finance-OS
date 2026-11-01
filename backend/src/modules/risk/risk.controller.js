@@ -24,21 +24,21 @@ export class RiskController {
           benchmark: `${metrics.summary.benchmarkVolatility}% (NIFTY 50)`,
         },
         beta: {
-          value: metrics.summary.beta.toFixed(2),
+          value: typeof metrics.summary.beta === 'number' ? metrics.summary.beta.toFixed(2) : 'N/A',
           label: 'Portfolio Beta',
-          status: metrics.summary.beta > 1.2 ? 'AGGRESSIVE' : 'BALANCED',
+          status: typeof metrics.summary.beta === 'number' ? (metrics.summary.beta > 1.2 ? 'AGGRESSIVE' : 'BALANCED') : 'UNAVAILABLE',
           description: 'Sensitivity relative to NIFTY 50 benchmark',
         },
         sharpe: {
-          value: metrics.summary.sharpe.toFixed(2),
+          value: typeof metrics.summary.sharpe === 'number' ? metrics.summary.sharpe.toFixed(2) : 'N/A',
           label: 'Sharpe Ratio',
-          status: metrics.summary.sharpe > 1.5 ? 'EXCELLENT' : metrics.summary.sharpe > 1.0 ? 'GOOD' : 'POOR',
+          status: typeof metrics.summary.sharpe === 'number' ? (metrics.summary.sharpe > 1.5 ? 'EXCELLENT' : metrics.summary.sharpe > 1.0 ? 'GOOD' : 'POOR') : 'UNAVAILABLE',
           description: `Risk-adjusted return vs ${metrics.assumptions.riskFreeRatePercent} risk-free rate`,
         },
         sortino: {
-          value: metrics.summary.sortino.toFixed(2),
+          value: typeof metrics.summary.sortino === 'number' ? metrics.summary.sortino.toFixed(2) : 'N/A',
           label: 'Sortino Ratio',
-          status: metrics.summary.sortino > 1.5 ? 'EXCELLENT' : 'MODERATE',
+          status: typeof metrics.summary.sortino === 'number' ? (metrics.summary.sortino > 1.5 ? 'EXCELLENT' : 'MODERATE') : 'UNAVAILABLE',
           description: 'Focus on downside volatility penalty only',
         },
         maxDrawdown: {

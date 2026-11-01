@@ -125,6 +125,12 @@ export class RiskService {
     const portfolioDailyReturns = [];
     const navSeries = [];
 
+    // Map benchmark returns by date for precise date-alignment
+    const benchReturnMap = new Map();
+    for (let t = 0; t < returnDates.length; t++) {
+      benchReturnMap.set(returnDates[t], benchReturns[t] || 0);
+    }
+
     if (sortedTx.length > 0) {
       const firstTxDate = new Date(sortedTx[0].executedAt || sortedTx[0].createdAt).toISOString().split('T')[0];
 
@@ -145,16 +151,16 @@ export class RiskService {
       let runningCash = implicitInitialCash;
       const runningHoldings = {};
       let txIdx = 0;
-      let initialFlowAccounted = false;
 
-      for (let idx = 0; idx < dateList.length; idx++) {
-        const dt = dateList[idx];
+      // Filter active trading dates starting strictly from inception date (firstTxDate)
+      const activeTradingDates = dateList.filter((dt) => dt >= firstTxDate);
+      if (activeTradingDates.length === 0 || activeTradingDates[0] > firstTxDate) {
+        activeTradingDates.unshift(firstTxDate);
+      }
+
+      for (let idx = 0; idx < activeTradingDates.length; idx++) {
+        const dt = activeTradingDates[idx];
         let dayExternalFlow = 0;
-
-        if (implicitInitialCash > 0 && !initialFlowAccounted && dt >= firstTxDate) {
-          dayExternalFlow += implicitInitialCash;
-          initialFlowAccounted = true;
-        }
 
         while (txIdx < sortedTx.length) {
           const tx = sortedTx[txIdx];
@@ -167,10 +173,11 @@ export class RiskService {
 
           if (tx.type === 'DEPOSIT') {
             runningCash += amount;
-            dayExternalFlow += amount;
+            // Only count external flow if not the inception transaction establishing baseline
+            if (idx > 0) dayExternalFlow += amount;
           } else if (tx.type === 'WITHDRAWAL') {
             runningCash -= amount;
-            dayExternalFlow -= amount;
+            if (idx > 0) dayExternalFlow -= amount;
           } else if (tx.type === 'BUY') {
             runningCash -= (amount + fees);
             runningHoldings[tx.symbol] = (runningHoldings[tx.symbol] || 0) + qty;
@@ -182,10 +189,12 @@ export class RiskService {
           txIdx++;
         }
 
+        // Map price date to the closest available market date
+        const priceIdx = dateList.indexOf(dt);
         let dayEquityVal = 0;
         for (const [sym, q] of Object.entries(runningHoldings)) {
           if (q > 0) {
-            const p = priceMatrix[sym]?.[idx] || 0;
+            const p = priceIdx >= 0 ? (priceMatrix[sym]?.[priceIdx] || 0) : (equityHoldings.find((h) => h.symbol === sym)?.ltp || 0);
             dayEquityVal += q * p;
           }
         }
@@ -194,7 +203,7 @@ export class RiskService {
         navSeries.push({ date: dt, nav: dayNav, cash: runningCash, externalFlow: dayExternalFlow });
 
         // Calculate flow-adjusted return r_t = (NAV_t - ExternalFlow_t) / NAV_{t-1} - 1 (EOD convention)
-        if (idx > 0 && dt >= firstTxDate) {
+        if (idx > 0) {
           const prevNav = navSeries[idx - 1]?.nav || 0;
           if (prevNav > 0) {
             const flowAdjRet = (dayNav - dayExternalFlow) / prevNav - 1;
@@ -208,37 +217,60 @@ export class RiskService {
       }
     }
 
-    if (portfolioDailyReturns.length < 2) {
-      portfolioDailyReturns.length = 0; // reset
-      const numDays = returnDates.length;
-      for (let t = 0; t < numDays; t++) {
-        let dailyRet = 0;
-        for (const h of equityHoldings) {
-          const r = returnMatrix[h.symbol]?.[t] || 0;
-          dailyRet += (weights[h.symbol] || 0) * r;
-        }
-        portfolioDailyReturns.push({
-          date: returnDates[t],
-          return: RiskMath.round(dailyRet, 6),
-          nav: totalNav,
-        });
+    // 1-Year Constituent Asset Allocation Return Series
+    // If portfolio track record is short (< 20 trading sessions), evaluate 1Y risk profile from current asset weights
+    const constituentDailyReturns = [];
+    const numDays = returnDates.length;
+    for (let t = 0; t < numDays; t++) {
+      let dailyRet = 0;
+      for (const h of equityHoldings) {
+        const r = returnMatrix[h.symbol]?.[t] || 0;
+        dailyRet += (weights[h.symbol] || 0) * r;
+      }
+      constituentDailyReturns.push({
+        date: returnDates[t],
+        return: RiskMath.round(dailyRet, 6),
+        nav: totalNav,
+      });
+    }
+
+    // Determine return series for 1-Year risk profiling
+    const useConstituentRisk = portfolioDailyReturns.length < 20 && equityHoldings.length > 0;
+    const activeRiskSeries = useConstituentRisk ? constituentDailyReturns : portfolioDailyReturns;
+
+    // Build precisely date-aligned arrays for portfolio and benchmark returns
+    const alignedPortfolioReturns = [];
+    const alignedBenchmarkReturns = [];
+    const alignedDates = [];
+
+    for (const pt of activeRiskSeries) {
+      if (benchReturnMap.has(pt.date)) {
+        alignedPortfolioReturns.push(pt.return);
+        alignedBenchmarkReturns.push(benchReturnMap.get(pt.date));
+        alignedDates.push(pt.date);
       }
     }
 
-    const obsCount = portfolioDailyReturns.length;
+    const obsCount = alignedPortfolioReturns.length;
+    const isCashOnly = totalNav > 0 && equityHoldings.length === 0;
 
     return {
       valuation,
       equityHoldings,
       weights, // Capital weights (includes CASH)
       benchmarkSymbol,
-      returnDates: portfolioDailyReturns.map((pt) => pt.date),
+      returnDates: alignedDates,
       returnMatrix,
-      portfolioDailyReturns,
+      portfolioDailyReturns: activeRiskSeries,
+      realizedDailyReturns: portfolioDailyReturns,
       navSeries,
       dataStatus: overallDataStatus,
       observationPeriodDays: obsCount,
-      insufficientHistory: obsCount < 2,
+      insufficientHistory: !isCashOnly && obsCount < 2,
+      isCashOnly,
+      alignedPortfolioReturns,
+      alignedBenchmarkReturns,
+      methodology: useConstituentRisk ? 'CONSTITUENT_1Y' : 'REALIZED_TWR',
     };
   }
 
@@ -248,13 +280,24 @@ export class RiskService {
   async getRiskMetrics(portfolioId = null, userId = null, customRf = null) {
     const rf = customRf !== null && customRf !== undefined ? Number(customRf) : this.DEFAULT_RISK_FREE_RATE;
     const sync = await this.getSynchronizedReturns(portfolioId, userId);
-    const { valuation, equityHoldings, weights, benchmarkSymbol, portfolioDailyReturns, returnMatrix, dataStatus, insufficientHistory, observationPeriodDays } = sync;
+    const {
+      valuation,
+      equityHoldings,
+      weights,
+      benchmarkSymbol,
+      dataStatus,
+      insufficientHistory,
+      observationPeriodDays,
+      isCashOnly,
+      alignedPortfolioReturns,
+      alignedBenchmarkReturns,
+      navSeries,
+      portfolioDailyReturns,
+    } = sync;
 
-    const pReturns = portfolioDailyReturns.map((pt) => pt.return);
-    const benchReturns = returnMatrix[benchmarkSymbol] || [];
     const totalVal = valuation.summary.totalValue;
 
-    if (insufficientHistory || pReturns.length < 2) {
+    if (insufficientHistory || (!isCashOnly && alignedPortfolioReturns.length < 2)) {
       return {
         portfolio: valuation.portfolio,
         totalValue: totalVal,
@@ -273,9 +316,9 @@ export class RiskService {
           riskLevel: 'INSUFFICIENT_DATA',
           annualizedVolatility: 0,
           benchmarkVolatility: 0,
-          beta: 0,
-          sharpe: 0,
-          sortino: 0,
+          beta: null,
+          sharpe: null,
+          sortino: null,
           maxDrawdown: 0,
           peakDate: new Date().toISOString().split('T')[0],
           troughDate: new Date().toISOString().split('T')[0],
@@ -298,35 +341,88 @@ export class RiskService {
       };
     }
 
+    // Benchmark Volatility & Variance
+    const benchDailyStd = RiskMath.standardDeviation(alignedBenchmarkReturns, true);
+    const benchmarkVolatility = RiskMath.round(benchDailyStd * Math.sqrt(252) * 100, 2);
+    const varBench = RiskMath.variance(alignedBenchmarkReturns, true);
+
+    // If portfolio is 100% Cash, volatility, beta, and drawdown are 0.00
+    if (isCashOnly) {
+      return {
+        portfolio: valuation.portfolio,
+        totalValue: totalVal,
+        observationPeriodDays: alignedBenchmarkReturns.length,
+        insufficientHistory: false,
+        dataStatus,
+        assumptions: {
+          riskFreeRate: rf,
+          riskFreeRatePercent: `${(rf * 100).toFixed(1)}%`,
+          benchmarkSymbol,
+          confidenceIntervals: ['95%', '99%'],
+          cashFlowTimingConvention: 'End-of-Day (EOD)',
+        },
+        summary: {
+          compositeScore: 10,
+          riskLevel: 'CONSERVATIVE',
+          annualizedVolatility: 0.00,
+          benchmarkVolatility,
+          beta: 0.00,
+          sharpe: 0.00,
+          sortino: 0.00,
+          maxDrawdown: 0.00,
+          peakDate: new Date().toISOString().split('T')[0],
+          troughDate: new Date().toISOString().split('T')[0],
+        },
+        valueAtRisk: {
+          historical: {
+            confidence95: { percent: 0, amount: 0 },
+            confidence99: { percent: 0, amount: 0 },
+          },
+          parametric: {
+            confidence95: { percent: 0, amount: 0 },
+            confidence99: { percent: 0, amount: 0 },
+          },
+          conditionalVaR: {
+            confidence95: { percent: 0, amount: 0 },
+            confidence99: { percent: 0, amount: 0 },
+          },
+          parametricCVaR: {
+            confidence95: { percent: 0, amount: 0 },
+            confidence99: { percent: 0, amount: 0 },
+          },
+        },
+        drawdown: { maxDrawdown: 0, peakDate: null, troughDate: null, series: [] },
+      };
+    }
+
+    const pReturns = alignedPortfolioReturns;
+    const bReturns = alignedBenchmarkReturns;
+
     // 1. Annualized Portfolio Volatility (sample std * sqrt(252))
     const dailyStd = RiskMath.standardDeviation(pReturns, true);
     const annualizedVolatility = RiskMath.round(dailyStd * Math.sqrt(252) * 100, 2);
 
-    // 2. Benchmark Volatility
-    const benchDailyStd = RiskMath.standardDeviation(benchReturns, true);
-    const benchmarkVolatility = RiskMath.round(benchDailyStd * Math.sqrt(252) * 100, 2);
+    // 2. Portfolio Beta vs Benchmark: Cov(P, B) / Var(B) on aligned dates
+    const covPortBench = RiskMath.covariance(pReturns, bReturns);
+    const beta = varBench > 0 ? RiskMath.round(covPortBench / varBench, 2) : null;
 
-    // 3. Beta vs Benchmark
-    const covPortBench = RiskMath.covariance(pReturns, benchReturns);
-    const varBench = RiskMath.variance(benchReturns, true);
-    const beta = varBench > 0 && dailyStd > 0 ? RiskMath.round(covPortBench / varBench, 2) : 0.0;
-
-    // 4. Daily Risk-Free Rate Compounding: r_f_daily = (1 + R_f)^(1/252) - 1
+    // 3. Sharpe Ratio: (R_p - R_f) / Annualized_Vol
+    // Daily risk-free rate compounding: r_f_daily = (1 + R_f)^(1/252) - 1
     const dailyRf = (1 + rf) ** (1 / 252) - 1;
     const excessReturns = pReturns.map((r) => r - dailyRf);
-
-    // 5. Sharpe Ratio: mean(excess) / std(excess) * sqrt(252)
     const meanExcess = RiskMath.mean(excessReturns);
     const stdExcess = RiskMath.standardDeviation(excessReturns, true);
     const sharpe = stdExcess > 0 ? RiskMath.round((meanExcess / stdExcess) * Math.sqrt(252), 2) : 0;
 
-    // 6. Sortino Ratio: mean(excess) * 252 / (downside_std * sqrt(252))
+    // 4. Sortino Ratio: mean(excess) * 252 / (downside_std * sqrt(252))
     const downsideSqDiffs = excessReturns.map((r) => (r < 0 ? r ** 2 : 0));
     const downsideDevDaily = Math.sqrt(RiskMath.mean(downsideSqDiffs));
     const sortino = downsideDevDaily > 0 ? RiskMath.round((meanExcess * 252) / (downsideDevDaily * Math.sqrt(252)), 2) : 0;
 
-    // 7. Maximum Drawdown & Underwater Path
-    const drawdownAnalysis = RiskMath.calculateDrawdowns(portfolioDailyReturns);
+    // 5. Maximum Drawdown & Underwater Path (from historical NAV curve where available)
+    const drawdownAnalysis = navSeries && navSeries.length >= 2
+      ? RiskMath.calculateDrawdownsFromValuations(navSeries)
+      : RiskMath.calculateDrawdowns(portfolioDailyReturns);
 
     // 8. Historical VaR & CVaR (Empirical Quantiles)
     const sortedReturns = [...pReturns].sort((a, b) => a - b);

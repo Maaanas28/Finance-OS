@@ -51,9 +51,11 @@ export class AnalyticsService {
 
     // Compute Jensen's Alpha: Alpha = R_p - [R_f + Beta * (R_m - R_f)]
     const rf = this.DEFAULT_RISK_FREE_RATE;
-    const benchVol = rmSummary.benchmarkVolatility || 20; // Default NIFTY annualized benchmark return proxy
-    const expectedReturnCapm = rf + rmSummary.beta * (0.12 - rf); // Assuming 12% market expected return
-    const portAnnualizedRet = rmSummary.annualizedVolatility > 0 ? (rmSummary.sharpe * (rmSummary.annualizedVolatility / 100)) + rf : 0;
+    const betaVal = typeof rmSummary.beta === 'number' ? rmSummary.beta : 1.0;
+    const expectedReturnCapm = rf + betaVal * (0.12 - rf); // Standard 12% long-term market expected return
+    const portAnnualizedRet = rmSummary.annualizedVolatility > 0 && typeof rmSummary.sharpe === 'number'
+      ? (rmSummary.sharpe * (rmSummary.annualizedVolatility / 100)) + rf
+      : 0;
     const jensensAlpha = equityHoldings.length > 0 ? RiskMath.round((portAnnualizedRet - expectedReturnCapm) * 100, 2) : 0;
 
     return {
@@ -139,21 +141,28 @@ export class AnalyticsService {
     const { returnDates, returnMatrix, portfolioDailyReturns, dataStatus } = sync;
 
     const benchReturns = returnMatrix[benchmarkSymbol] || [];
-    let cumulativePortRet = 0;
-    let cumulativeBenchRet = 0;
+    const benchReturnMap = new Map();
+    for (let t = 0; t < returnDates.length; t++) {
+      benchReturnMap.set(returnDates[t], benchReturns[t] || 0);
+    }
+
+    let cumulativePortWealth = 1.0;
+    let cumulativeBenchWealth = 1.0;
 
     const initialNAV = summary.totalValue > 0 ? summary.totalValue : 100000;
 
-    const series = portfolioDailyReturns.map((pt, idx) => {
-      cumulativePortRet += pt.return;
-      const bRet = benchReturns[idx] || 0;
-      cumulativeBenchRet += bRet;
+    const series = portfolioDailyReturns.map((pt) => {
+      const pRet = Number(pt.return) || 0;
+      const bRet = Number(benchReturnMap.get(pt.date)) || 0;
+
+      cumulativePortWealth *= (1 + pRet);
+      cumulativeBenchWealth *= (1 + bRet);
 
       return {
         date: pt.date,
-        portfolioNAV: RiskMath.round(initialNAV * (1 + cumulativePortRet), 2),
-        portfolioReturnPercent: RiskMath.round(cumulativePortRet * 100, 2),
-        benchmarkReturnPercent: RiskMath.round(cumulativeBenchRet * 100, 2),
+        portfolioNAV: RiskMath.round(initialNAV * cumulativePortWealth, 2),
+        portfolioReturnPercent: RiskMath.round((cumulativePortWealth - 1) * 100, 2),
+        benchmarkReturnPercent: RiskMath.round((cumulativeBenchWealth - 1) * 100, 2),
       };
     });
 

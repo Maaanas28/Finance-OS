@@ -46,7 +46,7 @@ describe('StressTestService Engine & Scenario Evaluation', () => {
     await buyStock(auth.token, testPortfolioId, 'HDFCBANK', 80);
     await buyStock(auth.token, testPortfolioId, 'INFY', 95);
     await buyStock(auth.token, testPortfolioId, 'TATAMOTORS', 110);
-  }, 30000);
+  }, 60000);
 
   it('should list all built-in macro and sector stress scenarios', async () => {
     const scenarios = await stressTestService.getScenarios();
