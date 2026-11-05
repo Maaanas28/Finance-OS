@@ -165,10 +165,14 @@ export class RiskController {
       const validated = monteCarloSchema.parse(req.body);
       const userId = req.user?.id || null;
       const simulation = await monteCarloService.runSimulation(validated.portfolioId, {
+        initialPortfolioValue: validated.initialPortfolioValue,
+        expectedReturn: validated.expectedReturn,
+        volatility: validated.volatility,
         simulationCount: validated.simulationCount,
         horizonDays: validated.horizonDays,
         targetReturn: validated.targetReturn,
         seed: validated.seed,
+        historicalYears: validated.historicalYears,
         userId,
       });
       return sendSuccess(res, simulation, 200);

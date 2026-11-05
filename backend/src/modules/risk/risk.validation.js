@@ -23,9 +23,14 @@ export const stressTestSchema = z.object({
 });
 
 export const monteCarloSchema = z.object({
-  portfolioId: z.string().optional(),
-  simulationCount: z.coerce.number().int().min(100).max(5000).default(1000),
+  portfolioId: z.string().optional().nullable(),
+  initialPortfolioValue: z.coerce.number().positive().optional().nullable(),
+  // Accepts both percentage (e.g. 12 for 12%) and decimal fraction (e.g. 0.12)
+  expectedReturn: z.coerce.number().min(-100).max(500).optional().nullable(),
+  volatility: z.coerce.number().min(0).max(500).optional().nullable(),
+  simulationCount: z.coerce.number().int().min(100).max(10000).default(1000),
   horizonDays: z.coerce.number().int().min(10).max(504).default(252),
-  targetReturn: z.coerce.number().min(-0.5).max(3.0).default(0.12),
-  seed: z.coerce.number().int().optional(),
+  targetReturn: z.coerce.number().min(-100).max(500).optional().nullable(),
+  seed: z.coerce.number().int().optional().nullable(),
+  historicalYears: z.coerce.number().int().min(1).max(5).default(3).optional(),
 });

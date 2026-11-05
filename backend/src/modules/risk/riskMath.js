@@ -104,6 +104,39 @@ export const RiskMath = {
   },
 
   /**
+   * Cholesky Decomposition: L * L^T = A
+   * Decomposes a symmetric positive semi-definite matrix A (such as an N x N correlation matrix)
+   * into a lower triangular matrix L.
+   * Uses a tiny ridge regularizer on the diagonal to guarantee numerical stability.
+   * @param {Array<Array<number>>} matrix - N x N symmetric matrix
+   * @param {number} ridge - Regularization term added to diagonal (default: 1e-4)
+   * @returns {Array<Array<number>>} L - N x N lower triangular matrix
+   */
+  cholesky(matrix, ridge = 1e-4) {
+    const n = matrix.length;
+    if (n === 0) return [];
+    if (n === 1) return [[Math.sqrt(Math.max(1e-12, (matrix[0][0] || 1) + ridge))]];
+
+    const L = Array.from({ length: n }, () => Array(n).fill(0));
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j <= i; j++) {
+        let sum = 0;
+        for (let k = 0; k < j; k++) {
+          sum += L[i][k] * L[j][k];
+        }
+        if (i === j) {
+          const diagVal = matrix[i][i] + ridge - sum;
+          L[i][j] = Math.sqrt(Math.max(1e-12, diagVal));
+        } else {
+          const denom = L[j][j];
+          L[i][j] = denom > 1e-12 ? (matrix[i][j] - sum) / denom : 0;
+        }
+      }
+    }
+    return L;
+  },
+
+  /**
    * Percentile extraction from a sorted array (linear interpolation)
    * @param {Array<number>} sortedArr - Must be sorted in ascending order
    * @param {number} p - Percentile between 0 and 100
