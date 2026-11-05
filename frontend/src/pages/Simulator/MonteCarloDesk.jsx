@@ -1086,26 +1086,6 @@ export function MonteCarloDesk() {
           badgeVariant={o?.potentialGainLoss >= 0 ? 'gain' : 'loss'}
           icon={TrendingUp}
         />
-
-        {/* Metric G: Value at Risk (95%) */}
-        <MetricCard
-          label="Value at Risk — VaR (95%)"
-          value={o?.var95Amount != null ? formatCurrency(o.var95Amount) : '—'}
-          subvalue={`${o?.var95Percent ?? 0}% of portfolio NAV — max expected horizon loss at 95% confidence`}
-          badgeText="VaR 95%"
-          badgeVariant="loss"
-          icon={ShieldCheck}
-        />
-
-        {/* Metric H: CVaR / Expected Shortfall (95%) */}
-        <MetricCard
-          label="Expected Shortfall — CVaR (95%)"
-          value={o?.cvar95Amount != null ? formatCurrency(o.cvar95Amount) : '—'}
-          subvalue={`${o?.cvar95Percent ?? 0}% of portfolio NAV — average loss in worst 5% of simulated paths`}
-          badgeText="CVaR 95%"
-          badgeVariant="loss"
-          icon={AlertTriangle}
-        />
       </div>
 
       {/* 4. Visualization Panel (Two Simple Charts) */}
