@@ -241,23 +241,30 @@ export class YahooFinanceProvider extends MarketDataProvider {
       '3m': { period1: new Date(now - 90 * 86400 * 1000), interval: '1d', queryRange: '3mo' },
       '6m': { period1: new Date(now - 180 * 86400 * 1000), interval: '1d', queryRange: '6mo' },
       '1y': { period1: new Date(now - 365 * 86400 * 1000), interval: '1d', queryRange: '1y' },
-      '5y': { period1: new Date(now - 5 * 365 * 86400 * 1000), interval: '1mo', queryRange: '5y' },
+      '2y': { period1: new Date(now - 2 * 365 * 86400 * 1000), interval: '1d', queryRange: '2y' },
+      '3y': { period1: new Date(now - 3 * 365 * 86400 * 1000), interval: '1d', queryRange: '3y' },
+      '4y': { period1: new Date(now - 4 * 365 * 86400 * 1000), interval: '1d', queryRange: '4y' },
+      '5y': { period1: new Date(now - 5 * 365 * 86400 * 1000), interval: '1d', queryRange: '5y' },
       'all': { period1: new Date(now - 10 * 365 * 86400 * 1000), interval: '1mo', queryRange: 'max' },
     };
 
     const configRange = rangeMap[range.toLowerCase()] || rangeMap['1m'];
+    const chosenInterval = (typeof rangeInput === 'object' && rangeInput?.interval)
+      ? (rangeInput.interval === '1day' ? '1d' : rangeInput.interval)
+      : configRange.interval;
+    const finalConfig = { ...configRange, interval: chosenInterval };
 
     try {
       let result;
       if (this.yf && typeof this.yf.chart === 'function') {
         result = await this.yf.chart(yahooSymbol, {
-          period1: configRange.period1,
-          interval: configRange.interval,
+          period1: finalConfig.period1,
+          interval: finalConfig.interval,
         });
       } else if (typeof YahooFinance.chart === 'function') {
         result = await YahooFinance.chart(yahooSymbol, {
-          period1: configRange.period1,
-          interval: configRange.interval,
+          period1: finalConfig.period1,
+          interval: finalConfig.interval,
         });
       }
 
@@ -286,7 +293,7 @@ export class YahooFinanceProvider extends MarketDataProvider {
       throw new Error(`Empty quotes array returned from yahooFinance.chart for ${yahooSymbol}`);
     } catch (err) {
       logger.debug(`yahooFinance.chart note for [${yahooSymbol}]: ${err.message}. Using v8 direct chart fallback...`);
-      return await this.fetchChartFallbackCandles(normalizedInfo, yahooSymbol, range, configRange);
+      return await this.fetchChartFallbackCandles(normalizedInfo, yahooSymbol, range, finalConfig);
     }
   }
 

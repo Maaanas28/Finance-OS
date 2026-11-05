@@ -524,6 +524,7 @@ function HoldingsBreakdownTable({ holdings = [] }) {
               <th className="py-2 px-3 text-right">Weight</th>
               <th className="py-2 px-3 text-right">Expected Return (μ)</th>
               <th className="py-2 px-3 text-right">Volatility (σ)</th>
+              <th className="py-2 px-3 text-right">Aligned History</th>
               <th className="py-2 px-3 text-center">Status</th>
             </tr>
           </thead>
@@ -562,6 +563,9 @@ function HoldingsBreakdownTable({ holdings = [] }) {
                   </td>
                   <td className="py-2.5 px-3 text-right text-amber-300">
                     {isCash ? '0.0%' : `${h.volatilityPercent}%`}
+                  </td>
+                  <td className="py-2.5 px-3 text-right text-slate-400">
+                    {isCash ? '—' : `${h.alignedTradingDays || h.historicalDays || h.historicalObservations || 0}d`}
                   </td>
                   <td className="py-2.5 px-3 text-center">
                     {h.isFallback ? (
@@ -1025,9 +1029,9 @@ export function MonteCarloDesk() {
         </div>
       </div>
 
-      {/* 3. Simulation Outputs Strip (Exact 6 Core Metrics) */}
+      {/* 3. Simulation Outputs Strip (6 Core Beginner-Friendly Metrics) */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {/* Metric A: Median Ending Portfolio Value */}
+        {/* Metric 1: Median Ending Portfolio Value (P50) */}
         <MetricCard
           label="Median Ending Value (P₅₀)"
           value={formatCurrency(o?.medianTerminalValue || 0)}
@@ -1037,7 +1041,7 @@ export function MonteCarloDesk() {
           icon={Compass}
         />
 
-        {/* Metric B: Probability of Loss */}
+        {/* Metric 2: Probability of Loss */}
         <MetricCard
           label="Probability of Loss"
           value={`${o?.probabilityOfLossPercent !== undefined ? o.probabilityOfLossPercent : '0.0'}%`}
@@ -1047,37 +1051,37 @@ export function MonteCarloDesk() {
           icon={AlertTriangle}
         />
 
-        {/* Metric C: 5th Percentile Outcome */}
+        {/* Metric 3: 5th Percentile Floor (P5) */}
         <MetricCard
           label="5th Percentile Outcome (P₅)"
           value={formatCurrency(o?.percentile5TerminalValue || 0)}
-          subvalue="Pessimistic bear scenario (~5% fall below this floor)"
+          subvalue="Pessimistic bear scenario floor (~5% fall below)"
           badgeText="Worst 5% Floor"
           badgeVariant="loss"
           icon={TrendingDown}
         />
 
-        {/* Metric D: 95th Percentile Outcome */}
+        {/* Metric 4: 95th Percentile Ceiling (P95) */}
         <MetricCard
           label="95th Percentile Outcome (P₉₅)"
           value={formatCurrency(o?.percentile95TerminalValue || 0)}
-          subvalue="Optimistic bull scenario (~5% exceed this ceiling)"
+          subvalue="Optimistic bull scenario ceiling (~5% exceed)"
           badgeText="Best 5% Ceiling"
           badgeVariant="gain"
           icon={TrendingUp}
         />
 
-        {/* Metric E: Expected Ending Portfolio Value */}
+        {/* Metric 5: Expected Ending Portfolio Value (Mean) */}
         <MetricCard
           label="Expected Ending Value (Mean)"
           value={formatCurrency(o?.expectedTerminalValue || 0)}
-          subvalue={`Arithmetic average across all ${simulationCount.toLocaleString()} paths`}
+          subvalue={`${o?.expectedReturnPercent !== undefined ? (o.expectedReturnPercent >= 0 ? '+' : '') + o.expectedReturnPercent + '%' : '—'} expected drift across paths`}
           badgeText="Mean Average"
           badgeVariant="neutral"
           icon={Layers}
         />
 
-        {/* Metric F: Potential Gain / Loss */}
+        {/* Metric 6: Potential Gain / Loss */}
         <MetricCard
           label="Potential Gain / Loss"
           value={`${o?.potentialGainLoss >= 0 ? '+' : ''}${formatCurrency(o?.potentialGainLoss || 0)}`}

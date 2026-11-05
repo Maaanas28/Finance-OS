@@ -3,6 +3,7 @@ import { monteCarloService } from '../src/modules/risk/monteCarlo.service.js';
 import { marketDataService } from '../src/infrastructure/market/marketDataService.js';
 import { portfolioService } from '../src/modules/portfolio/portfolio.service.js';
 import { portfolioRepository } from '../src/infrastructure/database/portfolioRepository.js';
+import { RiskMath } from '../src/modules/risk/riskMath.js';
 import { BadRequestError } from '../src/utils/errors.js';
 
 describe('Monte Carlo Service - Stochastic Geometric Brownian Motion Engine', () => {
@@ -362,5 +363,105 @@ describe('Monte Carlo Service - Stochastic Geometric Brownian Motion Engine', ()
     expect(sim.parameters.alignedTradingDays).toBeGreaterThan(0);
     expect(sim.parameters.historicalYears).toBe(3);
     expect(sim.parameters.dataSource).toContain('Yahoo Finance');
+  });
+
+  it('28. Historical return & volatility calculation matches RiskMath empirical formulas', async () => {
+    const sim = await monteCarloService.runSimulation('portfolio-model-alpha', { simulationCount: 100, horizonDays: 63, seed: 42 });
+    const nonFallback = sim.holdingsBreakdown.filter((h) => !h.isFallback && !h.symbol.includes('CASH'));
+    expect(nonFallback.length).toBeGreaterThan(0);
+
+    for (const h of nonFallback) {
+      expect(h.historicalObservations).toBeGreaterThanOrEqual(60);
+      expect(h.alignedTradingDays).toBe(sim.parameters.alignedTradingDays);
+      expect(typeof h.expectedReturn).toBe('number');
+      expect(typeof h.volatility).toBe('number');
+      expect(h.volatility).toBeGreaterThan(0);
+      expect(h.expectedReturnPercent).toBeCloseTo(h.expectedReturn * 100, 2);
+      expect(h.volatilityPercent).toBeCloseTo(h.volatility * 100, 2);
+    }
+  });
+
+  it('29. Covariance matrix is symmetric and positive semi-definite (PSD)', async () => {
+    const sim = await monteCarloService.runSimulation('portfolio-model-alpha', { simulationCount: 100, horizonDays: 63, seed: 42 });
+    expect(sim.covarianceMatrix).toBeDefined();
+    const { matrix, symbols } = sim.covarianceMatrix;
+    const n = symbols.length;
+    expect(matrix.length).toBe(n);
+
+    // Symmetry check
+    for (let i = 0; i < n; i++) {
+      for (let j = 0; j < n; j++) {
+        expect(Math.abs(matrix[i][j] - matrix[j][i])).toBeLessThan(1e-6);
+      }
+    }
+
+    // Positive semi-definite test: x^T * Cov * x >= -1e-6 for test vectors
+    const testVectors = [
+      Array(n).fill(1 / n),
+      Array.from({ length: n }, (_, idx) => (idx === 0 ? 1 : 0)),
+      Array.from({ length: n }, (_, idx) => (idx % 2 === 0 ? 0.5 : -0.5)),
+    ];
+
+    for (const vec of testVectors) {
+      let quadForm = 0;
+      for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+          quadForm += vec[i] * vec[j] * matrix[i][j];
+        }
+      }
+      expect(quadForm).toBeGreaterThanOrEqual(-1e-6);
+    }
+  });
+
+  it('30. Cholesky decomposition factor reconstructs correlation matrix: L * L^T = R + ridge*I', () => {
+    const R = [
+      [1.0, 0.45, 0.20],
+      [0.45, 1.0, 0.35],
+      [0.20, 0.35, 1.0],
+    ];
+    const ridge = 1e-4;
+    const L = RiskMath.cholesky(R, ridge);
+
+    // L must be lower triangular
+    expect(L.length).toBe(3);
+    expect(L[0][1]).toBe(0);
+    expect(L[0][2]).toBe(0);
+    expect(L[1][2]).toBe(0);
+
+    // Reconstruct R_rec = L * L^T
+    for (let i = 0; i < 3; i++) {
+      for (let j = 0; j < 3; j++) {
+        let sum = 0;
+        for (let k = 0; k < 3; k++) {
+          sum += L[i][k] * L[j][k];
+        }
+        const expected = R[i][j] + (i === j ? ridge : 0);
+        expect(sum).toBeCloseTo(expected, 4);
+      }
+    }
+  });
+
+  it('31. Holdings breakdown accurately sums to portfolio equity value and 100% weight', async () => {
+    const sim = await monteCarloService.runSimulation('portfolio-model-alpha', { simulationCount: 100, horizonDays: 63, seed: 42 });
+    const { holdingsBreakdown, parameters } = sim;
+
+    const totalWeight = holdingsBreakdown.reduce((sum, h) => sum + h.portfolioWeightPercent, 0);
+    expect(totalWeight).toBeCloseTo(100, 1);
+
+    const totalCalculatedValue = holdingsBreakdown.reduce((sum, h) => sum + h.currentValue, 0);
+    expect(totalCalculatedValue).toBeCloseTo(parameters.initialPortfolioValue, 1);
+  });
+
+  it('32. Historical lookback can be configured to 1, 3, or 5 years', async () => {
+    for (const years of [1, 3, 5]) {
+      const sim = await monteCarloService.runSimulation('portfolio-model-alpha', {
+        simulationCount: 100,
+        horizonDays: 63,
+        historicalYears: years,
+        seed: 42,
+      });
+      expect(sim.parameters.historicalYears).toBe(years);
+      expect(sim.parameters.alignedTradingDays).toBeGreaterThan(0);
+    }
   });
 });

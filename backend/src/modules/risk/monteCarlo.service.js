@@ -4,41 +4,95 @@ import { RiskMath } from './riskMath.js';
 import { BadRequestError } from '../../utils/errors.js';
 import { logger } from '../../utils/logger.js';
 
+/**
+ * Safely extract YYYY-MM-DD date string from candle object
+ */
+function extractCandleDate(c) {
+  if (!c) return null;
+  if (c.date && typeof c.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(c.date)) {
+    return c.date;
+  }
+  const raw = c.date || c.time || c.timestamp;
+  if (!raw) return null;
+  if (typeof raw === 'string' && raw.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    return raw.substring(0, 10);
+  }
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString().split('T')[0];
+}
+
 export class MonteCarloService {
   /**
-   * Portfolio-Aware Stochastic Monte Carlo Simulation Engine
+   * Fetch 3-5 years of historical daily closes per holding with graceful timeframe fallback
+   * @param {string} symbol - Stock symbol
+   * @param {string} exchange - Exchange (NSE/BSE)
+   * @param {number} targetYears - Target lookback in years (1 to 5)
+   * @returns {Promise<{candles: Array, timeframe: string|null}>}
+   */
+  async fetchHoldingHistoricalPrices(symbol, exchange, targetYears = 3) {
+    const tryTfs = [`${targetYears}Y`];
+    for (const y of [5, 3, 2, 1]) {
+      const tf = `${y}Y`;
+      if (!tryTfs.includes(tf)) tryTfs.push(tf);
+    }
+
+    for (const tf of tryTfs) {
+      try {
+        const hist = await marketDataService.getHistoricalPrices(symbol, {
+          timeframe: tf,
+          interval: '1day',
+          exchange: exchange || 'NSE',
+        });
+        if (hist?.candles && Array.isArray(hist.candles)) {
+          const validCandles = hist.candles.filter(
+            (c) => Number(c.close) > 0 && extractCandleDate(c) !== null
+          );
+          if (validCandles.length >= 60) {
+            return { candles: validCandles, timeframe: tf };
+          }
+        }
+      } catch (err) {
+        logger.warn(`MonteCarlo: historical fetch failed for [${symbol}] at [${tf}]: ${err.message}`);
+      }
+    }
+
+    return { candles: [], timeframe: null };
+  }
+
+  /**
+   * Portfolio-Aware Historical Stochastic Monte Carlo Simulation Engine
    *
    * Genuinely simulates the user's ACTUAL portfolio holdings using Multi-Asset Correlated
-   * Geometric Brownian Motion (GBM):
+   * Geometric Brownian Motion (GBM) driven by 3-5 years of real Yahoo Finance historical prices:
    *
    * S_i(t + Δt) = S_i(t) × exp[ (μ_i - 0.5 * σ_i²)Δt + σ_i × √Δt × Z_i ]
    *
    * Where:
    * - S_i(t): Price of holding i at trading session t
-   * - μ_i: Annualized expected return estimated from historical daily closes (drift)
-   * - σ_i: Annualized volatility estimated from historical daily returns (diffusion)
+   * - μ_i: Annualized expected return estimated from empirical aligned daily closes (drift)
+   * - σ_i: Annualized volatility estimated from empirical aligned daily returns (diffusion)
    * - Δt: 1 / 252 (daily time step in a 252-day market year)
    * - Z_i: Correlated standard normal random shock derived via Cholesky factor L:
-   *        Z = L × ε, where ε ~ N(0, I)
+   *        Z = L × ε, where ε ~ N(0, I) and L × L^T = CorrelationMatrix
    * - Portfolio NAV at each time step:
    *        V(t) = ∑ [ q_i × S_i(t) ] + Cash
    *
    * @param {string} portfolioId - Portfolio identifier
-   * @param {Object} options - Simulation options (simulationCount, horizonDays, seed, overrides, userId)
+   * @param {Object} options - Simulation options (simulationCount, horizonDays, historicalYears, seed, overrides, userId)
    */
   async runSimulation(portfolioId = null, options = {}) {
     const {
       simulationCount = 1000,
       horizonDays = 252,
-      targetReturn = 0.12,
+      historicalYears = 3,
       seed = null,
       userId = null,
-      historicalYears = 3,
     } = options;
 
     const numPaths = Math.max(100, Math.min(10000, Number(simulationCount) || 1000));
     const horizon = Math.max(10, Math.min(504, Number(horizonDays) || 252));
-    const histYears = Math.max(1, Math.min(5, Number(historicalYears) || 3));
+    const targetYears = Math.max(1, Math.min(5, Number(historicalYears) || 3));
 
     // 1. Validate explicit initial value override if provided
     if (options.initialPortfolioValue !== undefined && options.initialPortfolioValue !== null) {
@@ -92,93 +146,159 @@ export class MonteCarloService {
       throw new BadRequestError('Initial portfolio value must be greater than zero.');
     }
 
-    // 3. Fetch Historical Price Data & Calibrate Parameters for Each Holding
-    // Map historicalYears (1-5) to timeframe strings the provider understands
-    const timeframeForYears = (years) => {
-      if (years >= 5) return '5Y';
-      if (years >= 3) return '3Y';
-      if (years >= 2) return '2Y';
-      return '1Y';
-    };
-
-    // Build ordered list of timeframes to try (most preferred first, fallback shorter)
-    const timeframesToTry = (() => {
-      const primary = timeframeForYears(histYears);
-      const fallbacks = ['3Y', '2Y', '1Y'].filter((tf) => tf !== primary);
-      return [primary, ...fallbacks];
-    })();
-
+    // 3. Step A: Fetch 3-5 Years Historical Price Data Per Holding via MarketDataService
     const candlesMap = new Map();
     if (activeHoldings.length > 0) {
       await Promise.all(
         activeHoldings.map(async (h) => {
-          for (const timeframe of timeframesToTry) {
-            try {
-              const hist = await marketDataService.getHistoricalPrices(h.symbol, {
-                timeframe,
-                interval: '1day',
-                exchange: h.exchange || 'NSE',
-              });
-              if (hist?.candles && Array.isArray(hist.candles) && hist.candles.length >= 20) {
-                candlesMap.set(h.symbol, hist.candles);
-                break; // Got enough data, stop trying shorter timeframes
-              }
-            } catch (err) {
-              logger.warn(`MonteCarlo: historical fetch failed for [${h.symbol}] @ ${timeframe}: ${err.message}`);
-            }
-          }
+          const hist = await this.fetchHoldingHistoricalPrices(h.symbol, h.exchange, targetYears);
+          candlesMap.set(h.symbol, hist);
         })
       );
     }
 
-    // Calibrate each holding's historical return series, μ_i, and σ_i using log returns
-    const calibratedHoldings = [];
-    const holdingReturnMaps = [];   // Map<date-string, log-return>
-    const holdingLogReturnArrays = []; // For empirical covariance matrix
+    // Extract return maps per holding
+    const parsedHoldings = [];
     let hasAnyFallback = false;
 
     if (activeHoldings.length > 0) {
       for (const h of activeHoldings) {
-        const candles = candlesMap.get(h.symbol) || [];
-        const sortedCandles = [...candles].sort(
-          (a, b) => new Date(a.time || a.timestamp || 0) - new Date(b.time || b.timestamp || 0)
-        );
+        const histData = candlesMap.get(h.symbol);
+        const candles = histData?.candles || [];
 
-        const returns = [];
+        // Sort chronologically ascending
+        const sortedCandles = [...candles].sort((a, b) => {
+          const tA = new Date(a.timestamp || a.time || a.date || 0).getTime();
+          const tB = new Date(b.timestamp || b.time || b.date || 0).getTime();
+          return tA - tB;
+        });
+
+        // Deduplicate by date (retain latest close)
+        const dedupMap = new Map();
+        for (const c of sortedCandles) {
+          const dt = extractCandleDate(c);
+          if (dt && Number(c.close) > 0) {
+            dedupMap.set(dt, Number(c.close));
+          }
+        }
+        const dedupEntries = Array.from(dedupMap.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+        // Calculate daily returns
         const dateReturnMap = new Map();
-        for (let t = 1; t < sortedCandles.length; t++) {
-          const prev = Number(sortedCandles[t - 1].close);
-          const cur = Number(sortedCandles[t].close);
+        const rawReturns = [];
+        for (let t = 1; t < dedupEntries.length; t++) {
+          const prev = dedupEntries[t - 1][1];
+          const cur = dedupEntries[t][1];
           if (prev > 0 && cur > 0) {
-            const ret = Math.log(cur / prev); // Log returns for GBM calibration
-            returns.push(ret);
-            const dtStr = sortedCandles[t].time || sortedCandles[t].timestamp?.split('T')[0];
-            if (dtStr) dateReturnMap.set(dtStr, ret);
+            const ret = (cur - prev) / prev;
+            const dt = dedupEntries[t][0];
+            dateReturnMap.set(dt, ret);
+            rawReturns.push(ret);
           }
         }
 
+        const isInsufficient = rawReturns.length < 60;
+        parsedHoldings.push({
+          rawHolding: h,
+          symbol: h.symbol,
+          exchange: h.exchange || 'NSE',
+          name: h.name || h.symbol,
+          dateReturnMap,
+          rawReturns,
+          isInsufficient,
+          fallbackReason: isInsufficient
+            ? `Insufficient historical price data (${rawReturns.length} days found, minimum 60 required). Using benchmark proxy.`
+            : null,
+        });
+      }
+    }
+
+    // Step B: Align Trading Dates Across All Non-Fallback Holdings
+    let nonFallbackCandidates = parsedHoldings.filter((p) => !p.isInsufficient);
+    let commonTradingDates = [];
+
+    if (nonFallbackCandidates.length > 0) {
+      let intersectionSet = new Set(nonFallbackCandidates[0].dateReturnMap.keys());
+      for (let i = 1; i < nonFallbackCandidates.length; i++) {
+        const nextSet = new Set();
+        const mapI = nonFallbackCandidates[i].dateReturnMap;
+        for (const d of intersectionSet) {
+          if (mapI.has(d)) nextSet.add(d);
+        }
+        intersectionSet = nextSet;
+      }
+
+      // If intersection is < 60 days across multi-stocks, iteratively drop the holding with fewest trading days
+      while (intersectionSet.size < 60 && nonFallbackCandidates.length > 1) {
+        let minIdx = 0;
+        let minDays = nonFallbackCandidates[0].dateReturnMap.size;
+        for (let i = 1; i < nonFallbackCandidates.length; i++) {
+          if (nonFallbackCandidates[i].dateReturnMap.size < minDays) {
+            minDays = nonFallbackCandidates[i].dateReturnMap.size;
+            minIdx = i;
+          }
+        }
+        const dropped = nonFallbackCandidates.splice(minIdx, 1)[0];
+        dropped.isInsufficient = true;
+        dropped.fallbackReason = 'Insufficient overlapping trading history with portfolio (< 60 common days). Using benchmark proxy.';
+
+        intersectionSet = new Set(nonFallbackCandidates[0].dateReturnMap.keys());
+        for (let i = 1; i < nonFallbackCandidates.length; i++) {
+          const nextSet = new Set();
+          const mapI = nonFallbackCandidates[i].dateReturnMap;
+          for (const d of intersectionSet) {
+            if (mapI.has(d)) nextSet.add(d);
+          }
+          intersectionSet = nextSet;
+        }
+      }
+
+      if (intersectionSet.size >= 60) {
+        commonTradingDates = Array.from(intersectionSet).sort();
+      } else if (nonFallbackCandidates.length === 1 && nonFallbackCandidates[0].dateReturnMap.size >= 60) {
+        commonTradingDates = Array.from(nonFallbackCandidates[0].dateReturnMap.keys()).sort();
+      } else {
+        // Fallback for all
+        for (const c of nonFallbackCandidates) {
+          c.isInsufficient = true;
+          c.fallbackReason = 'Insufficient aligned trading days across portfolio holdings. Using benchmark proxy.';
+        }
+        nonFallbackCandidates = [];
+        commonTradingDates = [];
+      }
+    }
+
+    const alignedDaysCount = commonTradingDates.length;
+
+    // Step C: Compute Empirical Statistics from Aligned Returns
+    const calibratedHoldings = [];
+
+    if (parsedHoldings.length > 0) {
+      for (const item of parsedHoldings) {
+        const h = item.rawHolding;
+        let isFallback = item.isInsufficient;
+        let fallbackReason = item.fallbackReason;
         let mu_i;
         let sigma_i;
-        let isFallback = false;
-        let fallbackReason = null;
+        let alignedReturns = [];
 
-        // Minimum 20 trading sessions for valid statistical sample
-        if (returns.length >= 20) {
-          const dailyMean = RiskMath.mean(returns);
-          const dailyVar = RiskMath.variance(returns, true);
-          // GBM: annualized drift = annualized_log_mean + 0.5*annualized_var (Itô correction already in GBM formula)
+        if (!isFallback && commonTradingDates.length >= 60) {
+          alignedReturns = commonTradingDates.map((d) => item.dateReturnMap.get(d));
+          const dailyMean = RiskMath.mean(alignedReturns);
           mu_i = dailyMean * 252;
-          const dailyStd = Math.sqrt(Math.max(0, dailyVar));
-          sigma_i = Math.max(0.00, dailyStd * Math.sqrt(252));
+          const dailyStd = RiskMath.standardDeviation(alignedReturns, true);
+          sigma_i = Math.max(0.001, dailyStd * Math.sqrt(252));
         } else {
           isFallback = true;
           hasAnyFallback = true;
-          fallbackReason = `Insufficient historical price data (${returns.length} days found, minimum 20 required). Using benchmark proxy.`;
-          mu_i = 0.12; // 12% standard Indian equity return baseline
+          if (!fallbackReason) {
+            fallbackReason = `Insufficient historical price data (${item.rawReturns.length} days found, minimum 60 required). Using benchmark proxy.`;
+          }
+          mu_i = 0.12; // 12% standard Indian equity baseline
           sigma_i = 0.15; // 15% standard market volatility
         }
 
-        // Apply user overrides if explicitly specified
+        // Apply explicit user overrides if specified
         if (options.expectedReturn !== undefined && options.expectedReturn !== null && !isNaN(options.expectedReturn)) {
           const raw = Number(options.expectedReturn);
           mu_i = Math.abs(raw) > 1 ? raw / 100 : raw;
@@ -206,17 +326,17 @@ export class MonteCarloService {
           expectedReturnPercent: RiskMath.round(mu_i * 100, 2),
           volatility: RiskMath.round(sigma_i, 4),
           volatilityPercent: RiskMath.round(sigma_i * 100, 2),
-          historicalObservations: returns.length,
+          historicalObservations: alignedReturns.length > 0 ? alignedReturns.length : item.rawReturns.length,
+          historicalDays: alignedReturns.length > 0 ? alignedReturns.length : item.rawReturns.length,
+          alignedTradingDays: alignedReturns.length > 0 ? alignedReturns.length : 0,
           isFallback,
           fallbackReason,
           dataStatus: isFallback ? 'BENCHMARK_FALLBACK' : 'LIVE',
+          alignedReturns,
         });
-
-        holdingReturnMaps.push(dateReturnMap);
-        holdingLogReturnArrays.push(returns);
       }
     } else {
-      // Ad-hoc single portfolio-level asset when no equity holdings exist
+      // Portfolio aggregate fallback when no equity holdings exist
       let defaultMu = 0.12;
       let defaultSigma = 0.15;
       if (options.expectedReturn !== undefined && options.expectedReturn !== null && !isNaN(options.expectedReturn)) {
@@ -242,101 +362,53 @@ export class MonteCarloService {
         volatility: RiskMath.round(defaultSigma, 4),
         volatilityPercent: RiskMath.round(defaultSigma * 100, 2),
         historicalObservations: 252,
+        historicalDays: 252,
+        alignedTradingDays: 252,
         isFallback: true,
         fallbackReason: 'No equity holdings registered. Simulating portfolio-level Geometric Brownian Motion.',
         dataStatus: 'BENCHMARK_FALLBACK',
+        alignedReturns: [],
       });
       hasAnyFallback = true;
-      cashBalance = 0; // Entire portfolio value is represented by the asset
+      cashBalance = 0;
     }
 
     const N = calibratedHoldings.length;
 
-    // 4. Build Empirical N×N Daily Covariance Matrix from Date-Aligned Returns,
-    //    Derive correlation matrix, then Cholesky-decompose the CORRELATION matrix
-    //    for GBM shock generation (preserves per-stock σ_i scaling).
-    let dailyCovMatrix = [];  // N×N empirical daily covariance
-    let correlationMatrix = []; // N×N empirical correlation (or fallback)
-    let L = [];               // Cholesky of CORRELATION matrix for GBM shocks
-    let alignedTradingDays = 0;
+    // 4. Construct N x N Empirical Covariance & Correlation Matrix & Cholesky Factor L
+    const correlationMatrix = Array.from({ length: N }, () => Array(N).fill(0));
+    const covarianceMatrix = Array.from({ length: N }, () => Array(N).fill(0));
 
-    if (N > 0) {
-      // Find the common date set across all holdings (intersection of their return date maps)
-      const allDateSets = holdingReturnMaps.map((m) => new Set(m.keys()));
-      let commonDates = [...(allDateSets[0] || new Set())];
-      for (let i = 1; i < allDateSets.length; i++) {
-        commonDates = commonDates.filter((d) => allDateSets[i].has(d));
-      }
-      commonDates.sort(); // chronological order
-      alignedTradingDays = commonDates.length;
+    for (let i = 0; i < N; i++) {
+      for (let j = 0; j < N; j++) {
+        if (i === j) {
+          correlationMatrix[i][j] = 1.0;
+          const dailyVar = (calibratedHoldings[i].volatility ** 2) / 252;
+          covarianceMatrix[i][j] = RiskMath.round(dailyVar, 8);
+        } else if (j > i) {
+          const retI = calibratedHoldings[i].alignedReturns;
+          const retJ = calibratedHoldings[j].alignedReturns;
+          let pairCorr = 0.30;
+          let pairCov = (pairCorr * calibratedHoldings[i].volatility * calibratedHoldings[j].volatility) / 252;
 
-      if (commonDates.length >= 20) {
-        // Build N aligned return series over the common date set
-        const alignedReturns = holdingReturnMaps.map((m) => commonDates.map((d) => m.get(d) ?? 0));
-
-        // Empirical daily covariance matrix (sample covariance, Bessel's correction)
-        dailyCovMatrix = Array.from({ length: N }, () => Array(N).fill(0));
-        const means = alignedReturns.map((arr) => RiskMath.mean(arr));
-        const nObs = commonDates.length;
-        for (let i = 0; i < N; i++) {
-          for (let j = i; j < N; j++) {
-            let cov = 0;
-            for (let t = 0; t < nObs; t++) {
-              cov += (alignedReturns[i][t] - means[i]) * (alignedReturns[j][t] - means[j]);
-            }
-            cov /= nObs - 1;
-            dailyCovMatrix[i][j] = cov;
-            dailyCovMatrix[j][i] = cov;
+          if (retI.length >= 60 && retJ.length >= 60 && retI.length === retJ.length) {
+            const r = RiskMath.correlation(retI, retJ);
+            pairCorr = Math.max(-0.95, Math.min(0.95, r));
+            pairCov = RiskMath.covariance(retI, retJ);
           }
+
+          correlationMatrix[i][j] = RiskMath.round(pairCorr, 4);
+          correlationMatrix[j][i] = RiskMath.round(pairCorr, 4);
+          covarianceMatrix[i][j] = RiskMath.round(pairCov, 8);
+          covarianceMatrix[j][i] = RiskMath.round(pairCov, 8);
         }
-
-        // Derive empirical correlation matrix from covariance matrix
-        correlationMatrix = Array.from({ length: N }, (_, i) =>
-          Array.from({ length: N }, (__, j) => {
-            const sigI = Math.sqrt(Math.max(0, dailyCovMatrix[i][i]));
-            const sigJ = Math.sqrt(Math.max(0, dailyCovMatrix[j][j]));
-            if (i === j) return 1.0;
-            if (sigI === 0 || sigJ === 0) return 0.0;
-            return RiskMath.round(Math.max(-0.95, Math.min(0.95, dailyCovMatrix[i][j] / (sigI * sigJ))), 4);
-          })
-        );
-      } else {
-        // Fallback: build diagonal covariance and pairwise correlation from individual σ_i
-        logger.warn(`MonteCarlo: insufficient aligned observations (${commonDates.length}) for empirical covariance. Using per-stock sigma with 0.30 baseline correlation.`);
-        dailyCovMatrix = Array.from({ length: N }, (_, i) =>
-          Array.from({ length: N }, (__, j) => {
-            if (i !== j) return 0;
-            const dailyVar = (calibratedHoldings[i].volatility / Math.sqrt(252)) ** 2;
-            return dailyVar;
-          })
-        );
-        correlationMatrix = Array.from({ length: N }, (_, i) =>
-          Array.from({ length: N }, (__, j) => {
-            if (i === j) return 1.0;
-            // Use pairwise alignment if available, otherwise 0.30 baseline
-            const mapI = holdingReturnMaps[i];
-            const mapJ = holdingReturnMaps[j];
-            if (mapI && mapJ) {
-              const alignedI = [], alignedJ = [];
-              for (const [dt, rI] of mapI.entries()) {
-                if (mapJ.has(dt)) { alignedI.push(rI); alignedJ.push(mapJ.get(dt)); }
-              }
-              if (alignedI.length >= 5) {
-                const r = RiskMath.correlation(alignedI, alignedJ);
-                return RiskMath.round(Math.max(-0.95, Math.min(0.95, r)), 4);
-              }
-            }
-            return 0.30;
-          })
-        );
       }
-
-      // Cholesky of CORRELATION matrix for GBM shock generation
-      // (per-stock σ_i scaling is applied separately via diffusions[i])
-      L = RiskMath.cholesky(correlationMatrix, 1e-4);
     }
 
-    // 5. Effective Portfolio Return & Volatility Metrics (Markowitz formula)
+    // Step D: Cholesky decomposition of the correlation matrix
+    const L = RiskMath.cholesky(correlationMatrix, 1e-4);
+
+    // 5. Portfolio Weighted Return and Markowitz Portfolio Volatility
     let effectivePortfolioMu = 0;
     let portfolioVariance = 0;
 
@@ -345,35 +417,28 @@ export class MonteCarloService {
       effectivePortfolioMu += wi * calibratedHoldings[i].expectedReturn;
       for (let j = 0; j < N; j++) {
         const wj = calibratedHoldings[j].portfolioWeightPercent / 100;
-        // σ_i × σ_j × ρ_ij gives annualized covariance
-        const rho_ij = correlationMatrix[i]?.[j] ?? (i === j ? 1.0 : 0.0);
-        const cov_ij = calibratedHoldings[i].volatility * calibratedHoldings[j].volatility * rho_ij;
-        portfolioVariance += wi * wj * cov_ij;
+        const annualCov_ij = calibratedHoldings[i].volatility * calibratedHoldings[j].volatility * correlationMatrix[i][j];
+        portfolioVariance += wi * wj * annualCov_ij;
       }
     }
     const effectivePortfolioSigma = Math.sqrt(Math.max(0, portfolioVariance));
 
-    // 6. Time Step & Simulation Parameters
+    // 6. Time Step & Stochastic Parameters
     const dt = 1 / 252;
     const sqrtDt = Math.sqrt(dt);
 
-    // Precompute GBM drift and per-stock diffusion coefficients
-    // GBM step: S_i(t+Δt) = S_i(t) × exp((μ_i − 0.5σ_i²)Δt + σ_i × √Δt × Z_i)
-    // where Z = L × ε (L = Cholesky of CORRELATION matrix, ε ~ N(0,I))
-    // so Z_i ~ N(0,1) with cross-asset correlations preserved.
     const drifts = new Float64Array(N);
     const diffusions = new Float64Array(N);
     for (let i = 0; i < N; i++) {
       const mu_i = calibratedHoldings[i].expectedReturn;
       const sig_i = calibratedHoldings[i].volatility;
       drifts[i] = (mu_i - 0.5 * (sig_i ** 2)) * dt;
-      diffusions[i] = sig_i * sqrtDt; // σ_i × √Δt: scales N(0,1) shock to correct magnitude
+      diffusions[i] = sig_i * sqrtDt;
     }
 
-    // Mulberry32 PRNG for deterministic seed or standard Math.random
     const randFn = seed !== null && seed !== undefined ? RiskMath.createMulberry32(seed) : Math.random;
 
-    // Sampling steps for visualization
+    // Visualization sample milestones
     const stepInterval = horizon > 252 ? 2 : 1;
     const sampledDays = [];
     for (let d = 0; d <= horizon; d += stepInterval) {
@@ -387,13 +452,12 @@ export class MonteCarloService {
     const pathValuesAtStep = Array.from({ length: numSampledSteps }, () => new Float64Array(numPaths));
     const terminalValues = new Float64Array(numPaths);
 
-    // 7. Execute Multi-Asset Correlated Monte Carlo Simulation
+    // 7. Step E: Execute Multi-Asset Correlated Monte Carlo Simulation
     const currentPrices = new Float64Array(N);
     const eps = new Float64Array(N);
     const zShocks = new Float64Array(N);
 
     for (let p = 0; p < numPaths; p++) {
-      // Initialize prices at Day 0
       for (let i = 0; i < N; i++) {
         currentPrices[i] = calibratedHoldings[i].currentPrice;
       }
@@ -402,13 +466,12 @@ export class MonteCarloService {
       pathValuesAtStep[0][p] = initialValue;
 
       for (let d = 1; d <= horizon; d++) {
-        // Generate independent standard normal variates epsilon ~ N(0, I)
+        // Draw N standard normals
         for (let i = 0; i < N; i++) {
-          eps[i] = RiskMath.boxMuller(randFn);
+          eps[i] = calibratedHoldings[i].volatility > 0 ? RiskMath.boxMuller(randFn) : 0;
         }
 
-        // Apply Cholesky transformation: Z = L * eps
-        // L = Cholesky of CORRELATION matrix → Z_i ~ N(0,1) with correlations
+        // Correlated shocks Z = L * eps
         for (let i = 0; i < N; i++) {
           let sum = 0;
           for (let k = 0; k <= i; k++) {
@@ -418,7 +481,6 @@ export class MonteCarloService {
         }
 
         // Advance each stock's price via correlated GBM
-        // S_i(t+Δt) = S_i(t) × exp((μ_i − 0.5σ_i²)Δt + σ_i × √Δt × Z_i)
         let currentPortfolioNav = cashBalance;
         for (let i = 0; i < N; i++) {
           currentPrices[i] *= Math.exp(drifts[i] + diffusions[i] * zShocks[i]);
@@ -431,7 +493,7 @@ export class MonteCarloService {
         }
       }
 
-      // Record terminal value at horizon
+      // Terminal portfolio NAV
       let finalNav = cashBalance;
       for (let i = 0; i < N; i++) {
         finalNav += calibratedHoldings[i].quantity * currentPrices[i];
@@ -439,7 +501,7 @@ export class MonteCarloService {
       terminalValues[p] = finalNav;
     }
 
-    // 8. 20 Sample Paths for Visual Paths Chart
+    // 8. 20 Sample Paths for Visualization
     const samplePathCount = Math.min(20, numPaths);
     const sampleIndices = [];
     const stepSpacing = (numPaths - 1) / Math.max(1, samplePathCount - 1);
@@ -455,7 +517,7 @@ export class MonteCarloService {
       })),
     }));
 
-    // 9. Trajectory Percentile Bands per Step (P5, P25, Median P50, P75, P95)
+    // 9. Trajectory Percentiles per Step (P5, P25, P50, P75, P95)
     const trajectoryPercentiles = sampledDays.map((day, sIdx) => {
       const stepVals = Array.from(pathValuesAtStep[sIdx]).sort((a, b) => a - b);
       return {
@@ -468,7 +530,7 @@ export class MonteCarloService {
       };
     });
 
-    // 10. Core Outcome Metrics
+    // 10. Step F: Output Metrics (VaR 95%, CVaR 95%, Expected Value, Median, etc.)
     const sortedTerminal = Array.from(terminalValues).sort((a, b) => a - b);
     const meanTerminal = RiskMath.mean(sortedTerminal);
     const medianTerminal = RiskMath.percentile(sortedTerminal, 50);
@@ -477,25 +539,32 @@ export class MonteCarloService {
     const minVal = sortedTerminal[0];
     const maxVal = sortedTerminal[sortedTerminal.length - 1];
 
-    // Probability of capital loss: P(Ending Value < Initial Value)
+    // Probability of capital loss: % of paths where V_T < V_0
     let lossCount = 0;
     for (let i = 0; i < numPaths; i++) {
       if (terminalValues[i] < initialValue) lossCount++;
     }
     const probabilityOfLossPercent = RiskMath.round((lossCount / numPaths) * 100, 2);
 
-    // Value at Risk (95%): VaR = V(0) - P5(terminal values)
-    // Interpretation: with 95% confidence, losses won't exceed VaR over the simulation horizon
-    const var95Amount = RiskMath.round(Math.max(0, initialValue - p5Terminal), 2);
+    // Value at Risk (95% Confidence): V_0 - P5 (monetary loss)
+    const var95Amount = Math.max(0, RiskMath.round(initialValue - p5Terminal, 2));
     const var95Percent = initialValue > 0 ? RiskMath.round((var95Amount / initialValue) * 100, 2) : 0;
 
-    // Conditional Value at Risk / Expected Shortfall (95%):
-    // CVaR = average of terminal values in the worst 5% of paths
-    const tail5Cutoff = Math.floor(numPaths * 0.05);
-    const tailValues = sortedTerminal.slice(0, Math.max(1, tail5Cutoff));
-    const cvarTerminalMean = RiskMath.mean(tailValues);
-    const cvar95Amount = RiskMath.round(Math.max(0, initialValue - cvarTerminalMean), 2);
+    // Expected Shortfall (CVaR 95%): average of paths in worst 5% tail
+    const worst5Count = Math.max(1, Math.floor(numPaths * 0.05));
+    const worst5Paths = sortedTerminal.slice(0, worst5Count);
+    const worst5MeanVal = RiskMath.mean(worst5Paths);
+    const cvarTerminalMean = RiskMath.round(worst5MeanVal, 2);
+    const cvar95Amount = Math.max(0, RiskMath.round(initialValue - worst5MeanVal, 2));
     const cvar95Percent = initialValue > 0 ? RiskMath.round((cvar95Amount / initialValue) * 100, 2) : 0;
+
+    // Expected return %: (mean terminal - V_0) / V_0 * 100
+    const expectedReturnPercent = initialValue > 0
+      ? RiskMath.round(((meanTerminal - initialValue) / initialValue) * 100, 2)
+      : 0;
+
+    // Portfolio volatility %: annualized weighted portfolio volatility
+    const portfolioVolatilityPercent = RiskMath.round(effectivePortfolioSigma * 100, 2);
 
     // Potential Gain / Loss from initial value to median outcome
     const potentialGainLoss = RiskMath.round(medianTerminal - initialValue, 2);
@@ -533,8 +602,30 @@ export class MonteCarloService {
       });
     }
 
-    // Build Holdings Breakdown including Cash balance
-    const holdingsBreakdown = [...calibratedHoldings];
+    // Holdings Breakdown with Cash
+    const holdingsBreakdown = calibratedHoldings.map((h) => ({
+      id: h.id,
+      symbol: h.symbol,
+      exchange: h.exchange,
+      name: h.name,
+      quantity: h.quantity,
+      currentPrice: h.currentPrice,
+      currentValue: h.currentValue,
+      portfolioWeightPercent: h.portfolioWeightPercent,
+      expectedReturn: h.expectedReturn,
+      expectedReturnPercent: h.expectedReturnPercent,
+      annualReturn: h.expectedReturn,
+      annualReturnPercent: h.expectedReturnPercent,
+      volatility: h.volatility,
+      volatilityPercent: h.volatilityPercent,
+      historicalObservations: h.historicalObservations,
+      historicalDays: h.historicalDays,
+      alignedTradingDays: h.alignedTradingDays,
+      isFallback: h.isFallback,
+      fallbackReason: h.fallbackReason,
+      dataStatus: h.dataStatus,
+    }));
+
     if (cashBalance > 0) {
       holdingsBreakdown.push({
         id: 'holding-cash',
@@ -547,9 +638,13 @@ export class MonteCarloService {
         portfolioWeightPercent: initialValue > 0 ? RiskMath.round((cashBalance / initialValue) * 100, 2) : 0,
         expectedReturn: 0,
         expectedReturnPercent: 0,
+        annualReturn: 0,
+        annualReturnPercent: 0,
         volatility: 0,
         volatilityPercent: 0,
-        historicalObservations: 252,
+        historicalObservations: alignedDaysCount || 252,
+        historicalDays: alignedDaysCount || 252,
+        alignedTradingDays: alignedDaysCount || 252,
         isFallback: false,
         fallbackReason: null,
         dataStatus: 'LIQUID_CASH',
@@ -557,7 +652,7 @@ export class MonteCarloService {
     }
 
     const fallbackNotice = hasAnyFallback
-      ? 'One or more portfolio holdings had insufficient historical daily prices (< 20 days). Standard Indian benchmark parameters (12% return, 15% volatility) were used as transparent proxies for those assets.'
+      ? 'One or more portfolio holdings had insufficient historical daily prices (< 60 days). Standard Indian benchmark parameters (12% return, 15% volatility) were used as transparent proxies for those assets.'
       : null;
 
     return {
@@ -568,23 +663,24 @@ export class MonteCarloService {
         benchmarkSymbol: portfolio.benchmarkSymbol || 'NIFTY 50',
       },
       parameters: {
+        dataSource: 'Yahoo Finance (historical prices)',
+        historicalYears: targetYears,
+        alignedTradingDays: alignedDaysCount,
         initialPortfolioValue: RiskMath.round(initialValue, 2),
         effectivePortfolioReturn: RiskMath.round(effectivePortfolioMu, 4),
         effectivePortfolioReturnPercent: RiskMath.round(effectivePortfolioMu * 100, 2),
         effectivePortfolioVolatility: RiskMath.round(effectivePortfolioSigma, 4),
         effectivePortfolioVolatilityPercent: RiskMath.round(effectivePortfolioSigma * 100, 2),
+        expectedReturnPercent,
+        portfolioVolatilityPercent,
         // Backward-compatible aliases
         expectedReturn: RiskMath.round(effectivePortfolioMu, 4),
-        expectedReturnPercent: RiskMath.round(effectivePortfolioMu * 100, 2),
         annualizedDrift: RiskMath.round(effectivePortfolioMu * 100, 2),
         volatility: RiskMath.round(effectivePortfolioSigma, 4),
         volatilityPercent: RiskMath.round(effectivePortfolioSigma * 100, 2),
         annualizedVolatility: RiskMath.round(effectivePortfolioSigma * 100, 2),
         horizonDays: horizon,
         simulationCount: numPaths,
-        historicalYears: histYears,
-        alignedTradingDays,
-        dataSource: hasAnyFallback ? 'Yahoo Finance (partial — benchmark proxy used)' : `Yahoo Finance (${histYears}Y historical)`,
         timeStepDays: 1,
         timeStepYears: RiskMath.round(dt, 6),
         cashBalance: RiskMath.round(cashBalance, 2),
@@ -602,35 +698,45 @@ export class MonteCarloService {
         symbols: calibratedHoldings.map((h) => h.symbol),
         matrix: correlationMatrix,
       },
+      covarianceMatrix: {
+        symbols: calibratedHoldings.map((h) => h.symbol),
+        matrix: covarianceMatrix,
+      },
       outcomes: {
         medianTerminalValue: RiskMath.round(medianTerminal, 2),
-        probabilityOfLossPercent,
+        expectedTerminalValue: RiskMath.round(meanTerminal, 2),
         percentile5TerminalValue: RiskMath.round(p5Terminal, 2),
         percentile95TerminalValue: RiskMath.round(p95Terminal, 2),
-        expectedTerminalValue: RiskMath.round(meanTerminal, 2),
+        probabilityOfLossPercent,
+        var95: var95Amount,
+        var95Amount,
+        var95Percent,
+        cvar95: cvar95Amount,
+        cvar95Amount,
+        cvar95Percent,
+        cvarTerminalMean,
+        expectedShortfall95: cvar95Amount,
+        expectedShortfall95TerminalMean: cvarTerminalMean,
+        expectedShortfall95Loss: cvar95Amount,
+        expectedShortfall95Percent: cvar95Percent,
+        expectedReturnPercent,
+        portfolioVolatilityPercent,
         potentialGainLoss,
         potentialGainLossPercent,
         worstCaseTerminalValue: RiskMath.round(minVal, 2),
         bestCaseTerminalValue: RiskMath.round(maxVal, 2),
-        // Value at Risk (95%): absolute INR loss at the 5th percentile outcome
-        var95Amount,
-        var95Percent,
-        // Conditional VaR / Expected Shortfall (95%): average loss in worst 5% of paths
-        cvar95Amount,
-        cvar95Percent,
-        cvarTerminalMean: RiskMath.round(cvarTerminalMean, 2),
       },
       sampleTrajectories,
       trajectoryPercentiles,
       terminalHistogram: histogram,
       modelExplanation: {
-        modelType: 'Multi-Asset Correlated Geometric Brownian Motion (GBM) — Historical Data Calibrated',
-        formula: 'S_i(t + Δt) = S_i(t) × exp[(μ_i - 0.5σ_i²)Δt + Z_i × √Δt]',
+        modelType: 'Multi-Asset Correlated Geometric Brownian Motion (GBM)',
+        dataSource: 'Yahoo Finance (historical prices)',
+        formula: 'S_i(t + Δt) = S_i(t) × exp[(μ_i - 0.5σ_i²)Δt + σ_i√Δt × Z_i]',
         portfolioNAVFormula: 'V(t) = ∑ [ q_i × S_i(t) ] + Cash',
-        correlationMethod: `Empirical Daily Covariance Matrix (${histYears}Y aligned returns) → Cholesky: Z = L×ε, L×L^T = Σ`,
-        varDefinition: 'VaR(95%) = V(0) − P5(terminal values): maximum expected horizon loss at 95% confidence',
-        cvarDefinition: 'CVaR(95%) = average of terminal values in worst 5% of paths: expected loss beyond VaR threshold',
+        correlationMethod: 'Empirical covariance and correlation decomposed via Cholesky Factorization: Z = L × ε',
         timeStep: 'Daily trading session: Δt = 1/252 years',
+        calibration: `${alignedDaysCount} aligned trading sessions from Yahoo Finance historical prices`,
       },
       calculatedAt: new Date().toISOString(),
     };

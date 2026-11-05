@@ -383,10 +383,17 @@ export class MockMarketDataProvider extends MarketDataProvider {
   async getHistoricalPrices(normalizedInfo, options = {}) {
     const { timeframe = '1M', interval = '1day' } = options;
 
-    // P3.1: For 1Y + daily interval, return 252 business-day candles (skip weekends)
     let points;
-    if (timeframe === '1Y' && (interval === '1day' || interval === '1d')) {
-      points = 252; // trading days
+    if (interval === '1day' || interval === '1d') {
+      if (timeframe === '5Y') points = 1260;
+      else if (timeframe === '4Y') points = 1008;
+      else if (timeframe === '3Y') points = 756;
+      else if (timeframe === '2Y') points = 504;
+      else if (timeframe === '1Y') points = 252;
+      else if (timeframe === '6M') points = 126;
+      else if (timeframe === '3M') points = 63;
+      else if (timeframe === '1M') points = 22;
+      else points = 252;
     } else if (timeframe === '1D') {
       points = 24;
     } else if (timeframe === '1W') {
