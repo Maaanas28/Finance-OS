@@ -19,8 +19,8 @@ const envSchema = z.object({
   // P2.4: AI_PROVIDER accepts groq (and grok as deprecated alias)
   AI_PROVIDER: z.enum(['mock', 'groq', 'grok', 'openai', 'gemini']).default('mock'),
   AI_API_KEY: z.string().default(''),
-  // P2.4: AI_MODEL configurable; XAI_API_KEY removed (was Groq all along)
-  AI_MODEL: z.string().default('llama-3.3-70b-versatile'),
+  // P2.4: AI_MODEL configurable; default to active Groq model (qwen/qwen3.8-27b or openai/gpt-oss-20b)
+  AI_MODEL: z.string().default('qwen/qwen3.8-27b'),
   MARKET_DATA_MODE: z.enum(['auto', 'live', 'mock']).default('auto'),
   BHARATSTOCK_API_KEY: z.string().default(''),
   BHARATSTOCK_BASE_URL: z.string().default('https://bharatstockapi.com'),
