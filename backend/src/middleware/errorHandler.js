@@ -2,6 +2,7 @@ import { ZodError } from 'zod';
 import { AppError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 import { sendError } from '../utils/response.js';
+import { isConnectivityError } from '../infrastructure/database/resilience.js';
 
 export function errorHandler(err, req, res, next) {
   logger.error(`API Error on [${req.method} ${req.originalUrl}]:`, {
@@ -32,6 +33,16 @@ export function errorHandler(err, req, res, next) {
   // Handle JSON parse errors
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return sendError(res, 'Malformed JSON payload', 400, 'BAD_REQUEST');
+  }
+
+  // Handle Database Connectivity / Infrastructure Errors Gracefully
+  if (isConnectivityError(err)) {
+    return sendError(
+      res,
+      'Database service is temporarily unavailable. Please retry in a few moments.',
+      503,
+      'SERVICE_UNAVAILABLE'
+    );
   }
 
   // Default Internal Server Error

@@ -26,13 +26,20 @@ export function getPrismaClient() {
   return prismaInstance;
 }
 
-export async function checkDatabaseConnection() {
-  try {
-    const client = getPrismaClient();
-    await client.$queryRaw`SELECT 1`;
-    return { connected: true, provider: 'postgresql' };
-  } catch (err) {
-    logger.warn('PostgreSQL database check failed; fallback resilience active:', { error: err.message });
-    return { connected: false, error: err.message };
+export async function checkDatabaseConnection(retries = 2) {
+  for (let attempt = 1; attempt <= retries + 1; attempt++) {
+    try {
+      const client = getPrismaClient();
+      await client.$queryRaw`SELECT 1`;
+      return { connected: true, provider: 'postgresql' };
+    } catch (err) {
+      if (attempt <= retries) {
+        logger.info(`PostgreSQL connection attempt ${attempt} failed, retrying in 1.5s (waiting for cloud database compute)...`);
+        await new Promise((r) => setTimeout(r, 1500));
+      } else {
+        logger.warn('PostgreSQL database check failed; fallback resilience active:', { error: err.message });
+        return { connected: false, error: err.message };
+      }
+    }
   }
 }

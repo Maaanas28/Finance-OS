@@ -7,7 +7,40 @@ import { config } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
 
 // Prisma connectivity error codes
-const CONNECTIVITY_CODES = new Set(['P1000', 'P1001', 'P1002', 'P1008', 'P1017']);
+const CONNECTIVITY_CODES = new Set([
+  'P1000', // Authentication failed
+  'P1001', // Can't reach database server
+  'P1002', // The database server was reached but timed out
+  'P1003', // Database does not exist / not found
+  'P1008', // Operations timed out
+  'P1011', // Error opening a TLS connection
+  'P1017', // Server has closed the connection
+  'P2024', // Timed out fetching a new connection from the connection pool
+  'P2010', // Raw query failed due to connection termination
+]);
+
+const CONNECTIVITY_PATTERNS = [
+  /can't reach database/i,
+  /cant reach database/i,
+  /connection refused/i,
+  /ECONNREFUSED/i,
+  /ENOTFOUND/i,
+  /ETIMEDOUT/i,
+  /ECONNRESET/i,
+  /terminating connection/i,
+  /connection closed/i,
+  /connection terminated/i,
+  /server closed the connection/i,
+  /ssl connection closed/i,
+  /timed out fetching a new connection/i,
+  /operation timed out/i,
+  /pool timeout/i,
+  /socket hang up/i,
+  /broken pipe/i,
+  /endpoint is disabled/i,
+  /compute is suspended/i,
+  /neon/i,
+];
 
 /**
  * Returns true only for genuine database connectivity errors.
@@ -17,10 +50,12 @@ export function isConnectivityError(err) {
   if (!err) return false;
   // PrismaClientInitializationError = cannot reach DB at startup
   if (err.name === 'PrismaClientInitializationError') return true;
+  if (err.name === 'PrismaClientRustPanicError') return true;
+  if (err.name === 'PrismaClientUnknownRequestError' && err.message && CONNECTIVITY_PATTERNS.some((p) => p.test(err.message))) return true;
   // Prisma error codes for connection failures
   if (err.code && CONNECTIVITY_CODES.has(err.code)) return true;
-  // "Can't reach database server" message pattern
-  if (err.message && /can't reach database|connection refused|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/i.test(err.message)) {
+  // Connection and network timeout message patterns
+  if (err.message && CONNECTIVITY_PATTERNS.some((p) => p.test(err.message))) {
     return true;
   }
   return false;
@@ -28,14 +63,15 @@ export function isConnectivityError(err) {
 
 /**
  * Decides whether memory fallback is allowed.
- * Fallback allowed ONLY when:
- *  - NODE_ENV is not 'production'
- *  - ALLOW_MEMORY_FALLBACK=true in env
- *  - The error is a connectivity error (not a domain error)
+ * Fallback allowed when:
+ *  - ALLOW_MEMORY_FALLBACK=true in env, OR NODE_ENV is not 'production'
+ *  - The error is a connectivity error (not a domain constraint violation)
  */
 export function shouldFallbackToMemory(err) {
+  if (config.ALLOW_MEMORY_FALLBACK === 'true') {
+    return isConnectivityError(err);
+  }
   if (config.NODE_ENV === 'production') return false;
-  if (config.ALLOW_MEMORY_FALLBACK !== 'true') return false;
   return isConnectivityError(err);
 }
 

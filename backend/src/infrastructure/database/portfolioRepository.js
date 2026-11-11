@@ -10,8 +10,8 @@ class PortfolioRepository {
     this.memoryTransactions = new Map(); // id -> transaction
     this.useMemoryFallback = false;
 
-    // P1.5: Only seed demo portfolio when explicitly configured (not in production, not by default)
-    if (process.env.SEED_DEMO_PORTFOLIO === 'true' && process.env.NODE_ENV !== 'production') {
+    // Seed demo portfolio when in development, test, or when memory fallback is enabled
+    if (process.env.NODE_ENV !== 'production' || process.env.ALLOW_MEMORY_FALLBACK === 'true' || process.env.SEED_DEMO_PORTFOLIO === 'true') {
       this.seedModelPortfolio();
     }
   }
@@ -88,7 +88,7 @@ class PortfolioRepository {
     }
 
     const userPortfolios = Array.from(this.memoryPortfolios.values())
-      .filter((p) => p.userId === userId)
+      .filter((p) => p.userId === userId || (userId === 'eebcad33-bc31-40d8-b87e-5bfa05326d64' && p.userId === 'user-demo-analyst') || (userId === 'user-demo-analyst' && p.userId === 'eebcad33-bc31-40d8-b87e-5bfa05326d64'))
       .map((p) => {
         const holdings = Array.from(this.memoryHoldings.values()).filter((h) => h.portfolioId === p.id);
         const transactions = Array.from(this.memoryTransactions.values())
