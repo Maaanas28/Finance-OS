@@ -446,7 +446,9 @@ export function StrategyLabPage() {
             <div className="p-3 bg-[#080d18] border border-[#182030] rounded-sm">
               <div className="text-[10px] text-slate-500 uppercase font-bold">Win Rate</div>
               <div className="text-base font-bold text-sky-400 mt-1">
-                {summary.winRatePercent.toFixed(1)}%
+                {summary.winRatePercent !== null && summary.winRatePercent !== undefined
+                  ? `${Number(summary.winRatePercent).toFixed(1)}%`
+                  : 'N/A'}
               </div>
               <div className="text-[9px] text-slate-500 mt-1">
                 {summary.winningTrades}W / {summary.losingTrades}L
@@ -742,7 +744,9 @@ export function StrategyLabPage() {
               <div className="p-3 bg-[#060911] border border-[#162034] rounded-sm">
                 <div className="text-[10px] text-slate-500 uppercase font-bold">Sharpe Ratio</div>
                 <div className="text-base font-bold text-white mt-1">
-                  {summary.sharpeRatio.toFixed(2)}
+                  {summary.sharpeRatio !== null && summary.sharpeRatio !== undefined
+                    ? Number(summary.sharpeRatio).toFixed(2)
+                    : 'N/A'}
                 </div>
                 <div className="text-[9px] text-slate-500 mt-1">Rf: 6.5% Annualized</div>
               </div>
@@ -750,7 +754,7 @@ export function StrategyLabPage() {
               <div className="p-3 bg-[#060911] border border-[#162034] rounded-sm">
                 <div className="text-[10px] text-slate-500 uppercase font-bold">CAGR</div>
                 <div className="text-base font-bold text-purple-300 mt-1">
-                  {summary.cagrPercent !== null ? `${summary.cagrPercent}%` : 'N/A'}
+                  {summary.cagrPercent !== null && summary.cagrPercent !== undefined ? `${summary.cagrPercent}%` : 'N/A'}
                 </div>
                 <div className="text-[9px] text-slate-500 mt-1">Compound Annual Growth</div>
               </div>
@@ -758,7 +762,9 @@ export function StrategyLabPage() {
               <div className="p-3 bg-[#060911] border border-[#162034] rounded-sm">
                 <div className="text-[10px] text-slate-500 uppercase font-bold">Profit Factor</div>
                 <div className="text-base font-bold text-sky-400 mt-1">
-                  {summary.profitFactor.toFixed(2)}
+                  {summary.profitFactor !== null && summary.profitFactor !== undefined
+                    ? Number(summary.profitFactor).toFixed(2)
+                    : 'N/A'}
                 </div>
                 <div className="text-[9px] text-slate-500 mt-1">Gross Profit / Gross Loss</div>
               </div>

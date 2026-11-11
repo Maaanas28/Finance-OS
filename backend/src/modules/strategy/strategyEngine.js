@@ -138,10 +138,21 @@ export class StrategyEngine {
     }
 
     // Sort candles chronologically ascending (oldest first)
-    const sortedCandles = [...candles].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const sortedCandles = [...candles].sort((a, b) => {
+      const da = new Date(a.date || a.timestamp || a.time || 0);
+      const db = new Date(b.date || b.timestamp || b.time || 0);
+      return da - db;
+    });
+
     const closes = sortedCandles.map((c) => Number(c.close));
     const opens = sortedCandles.map((c) => Number(c.open || c.close));
-    const dates = sortedCandles.map((c) => c.date);
+    const dates = sortedCandles.map((c) => {
+      const d = c.date || c.timestamp || c.time || c.datetime;
+      if (!d) return 'N/A';
+      if (typeof d === 'string') return d.split('T')[0];
+      if (d instanceof Date) return d.toISOString().split('T')[0];
+      return String(d);
+    });
 
     const signals = new Array(sortedCandles.length).fill(0); // 1 = BUY, -1 = SELL, 0 = HOLD
 
@@ -315,13 +326,47 @@ export class StrategyEngine {
       });
     }
 
+    // Close any position that remains open at the end of the backtesting period
+    if (positionQuantity > 0) {
+      const lastIdx = sortedCandles.length - 1;
+      const finalClose = closes[lastIdx];
+      const finalDate = dates[lastIdx];
+      const execPrice = finalClose * slippageMultiplierSell;
+      const grossProceeds = positionQuantity * execPrice;
+      const commission = grossProceeds * commissionCostRate;
+      const netProceeds = grossProceeds - commission;
+
+      const tradeCostBasis = positionQuantity * buyPrice;
+      const tradePnl = netProceeds - tradeCostBasis;
+      const tradePnlPercent = tradeCostBasis > 0 ? (tradePnl / tradeCostBasis) * 100 : 0;
+
+      cash += netProceeds;
+
+      executedTrades.push({
+        tradeId: `TRD-${executedTrades.length + 1}`,
+        date: finalDate,
+        type: 'SELL_EXIT',
+        price: Number(execPrice.toFixed(2)),
+        quantity: positionQuantity,
+        cost: Number(netProceeds.toFixed(2)),
+        pnl: Number(tradePnl.toFixed(2)),
+        pnlPercent: Number(tradePnlPercent.toFixed(2)),
+        note: 'Period Close',
+      });
+
+      positionQuantity = 0;
+      buyPrice = 0;
+    }
+
     // 3. Compute Final Performance Metrics
     const finalCapital = equityCurve[equityCurve.length - 1].equity;
     const totalReturnPercent = ((finalCapital - initialCapital) / initialCapital) * 100;
 
-    const startDate = new Date(dates[0]);
-    const endDate = new Date(dates[dates.length - 1]);
-    const diffMs = Math.max(86400000, endDate.getTime() - startDate.getTime());
+    const startDate = dates[0];
+    const endDate = dates[dates.length - 1];
+    const d1 = new Date(startDate);
+    const d2 = new Date(endDate);
+    const diffMs = Math.max(86400000, d2.getTime() - d1.getTime());
     const diffDays = diffMs / (1000 * 60 * 60 * 24);
     const years = diffDays / 365.25;
 
@@ -335,11 +380,15 @@ export class StrategyEngine {
     const winningTrades = closedTrades.filter((t) => t.pnl > 0);
     const losingTrades = closedTrades.filter((t) => t.pnl <= 0);
 
-    const winRate = completedTradesCount > 0 ? (winningTrades.length / completedTradesCount) * 100 : 0;
+    const winRate = completedTradesCount > 0
+      ? Number(((winningTrades.length / completedTradesCount) * 100).toFixed(1))
+      : null;
 
     const grossProfit = winningTrades.reduce((acc, t) => acc + t.pnl, 0);
     const grossLoss = Math.abs(losingTrades.reduce((acc, t) => acc + t.pnl, 0));
-    const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? 99.9 : 0;
+    const profitFactor = completedTradesCount > 0
+      ? (grossLoss > 0 ? Number((grossProfit / grossLoss).toFixed(2)) : (grossProfit > 0 ? 99.9 : 0))
+      : null;
 
     // Daily Returns & Sharpe Ratio
     const dailyReturns = [];
@@ -361,7 +410,8 @@ export class StrategyEngine {
     const dailyStdDev = Math.sqrt(dailyVariance);
 
     const dailyRiskFree = 0.065 / 252; // 6.5% annual risk-free rate
-    const sharpeRatio = dailyStdDev > 0 ? ((meanDailyReturn - dailyRiskFree) / dailyStdDev) * Math.sqrt(252) : 0;
+    const rawSharpe = dailyStdDev > 0 ? ((meanDailyReturn - dailyRiskFree) / dailyStdDev) * Math.sqrt(252) : null;
+    const sharpeRatio = rawSharpe !== null && isFinite(rawSharpe) ? Number(rawSharpe.toFixed(2)) : null;
 
     // Alpha & Beta
     let covar = 0;
@@ -370,7 +420,7 @@ export class StrategyEngine {
       covar += (dailyReturns[k] - meanDailyReturn) * (benchmarkReturns[k] - meanBenchReturn);
       benchVar += Math.pow(benchmarkReturns[k] - meanBenchReturn, 2);
     }
-    const beta = benchVar > 0 ? covar / benchVar : 1.0;
+    const beta = benchVar > 0 ? Number((covar / benchVar).toFixed(2)) : 1.0;
     const annualizedStratReturn = meanDailyReturn * 252;
     const annualizedBenchReturn = meanBenchReturn * 252;
     const alpha = (annualizedStratReturn - (0.065 + beta * (annualizedBenchReturn - 0.065))) * 100;
@@ -382,17 +432,17 @@ export class StrategyEngine {
         totalReturnPercent: Number(totalReturnPercent.toFixed(2)),
         cagrPercent: cagrPercent,
         maxDrawdownPercent: Number(maxDrawdownValue.toFixed(2)),
-        sharpeRatio: Number(sharpeRatio.toFixed(2)),
-        winRatePercent: Number(winRate.toFixed(2)),
-        profitFactor: Number(profitFactor.toFixed(2)),
+        sharpeRatio: sharpeRatio,
+        winRatePercent: winRate,
+        profitFactor: profitFactor,
         totalTrades: totalTradesCount,
         completedTrades: completedTradesCount,
         winningTrades: winningTrades.length,
         losingTrades: losingTrades.length,
         alphaPercent: Number(alpha.toFixed(2)),
-        beta: Number(beta.toFixed(2)),
-        startDate: dates[0] || 'N/A',
-        endDate: dates[dates.length - 1] || 'N/A',
+        beta: beta,
+        startDate: startDate,
+        endDate: endDate,
         totalCandles: candles.length,
       },
       trades: executedTrades,
