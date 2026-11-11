@@ -146,7 +146,8 @@ export class StrategyEngine {
     const signals = new Array(sortedCandles.length).fill(0); // 1 = BUY, -1 = SELL, 0 = HOLD
 
     // 1. Calculate Signals based on Strategy Strategy Type
-    if (strategyId === 'mean_reversion' || strategyId === 'rsi_strategy') {
+    const stratNorm = (strategyId || '').toLowerCase().trim();
+    if (stratNorm === 'mean_reversion' || stratNorm === 'rsi' || stratNorm === 'rsi_strategy' || stratNorm.includes('rsi')) {
       const period = Number(params.rsiPeriod || 14);
       const oversold = Number(params.oversoldThreshold || 30);
       const overbought = Number(params.overboughtThreshold || 70);
@@ -162,7 +163,7 @@ export class StrategyEngine {
           }
         }
       }
-    } else if (strategyId === 'momentum_ema' || strategyId === 'ema_crossover') {
+    } else if (stratNorm === 'momentum_ema' || stratNorm === 'ema' || stratNorm === 'ema_crossover' || stratNorm.includes('ema')) {
       const fastPeriod = Number(params.fastEma || 20);
       const slowPeriod = Number(params.slowEma || 50);
 
@@ -181,7 +182,7 @@ export class StrategyEngine {
           }
         }
       }
-    } else if (strategyId === 'macd_momentum') {
+    } else if (stratNorm === 'macd_momentum' || stratNorm === 'macd' || stratNorm === 'macd_crossover' || stratNorm.includes('macd')) {
       const fastP = Number(params.fastPeriod || 12);
       const slowP = Number(params.slowPeriod || 26);
       const signalP = Number(params.signalPeriod || 9);
@@ -310,6 +311,7 @@ export class StrategyEngine {
         equity: Number(currentEquity.toFixed(2)),
         benchmarkEquity: Number(benchmarkEquity.toFixed(2)),
         drawdown: Number(currentDrawdown.toFixed(2)),
+        price: Number(currentClose.toFixed(2)),
       });
     }
 
@@ -319,18 +321,21 @@ export class StrategyEngine {
 
     const startDate = new Date(dates[0]);
     const endDate = new Date(dates[dates.length - 1]);
-    const diffDays = Math.max(1, (endDate - startDate) / (1000 * 60 * 60 * 24));
+    const diffMs = Math.max(86400000, endDate.getTime() - startDate.getTime());
+    const diffDays = diffMs / (1000 * 60 * 60 * 24);
     const years = diffDays / 365.25;
 
-    const cagrPercent = (Math.pow(Math.max(0.001, finalCapital / initialCapital), 1 / Math.max(0.1, years)) - 1) * 100;
+    const rawCagr = (Math.pow(Math.max(0.001, finalCapital / initialCapital), 1 / Math.max(0.1, years)) - 1) * 100;
+    const cagrPercent = isFinite(rawCagr) ? Number(rawCagr.toFixed(2)) : Number(totalReturnPercent.toFixed(2));
 
     // Closed trade analysis
     const closedTrades = executedTrades.filter((t) => t.type === 'SELL_EXIT');
-    const totalTradesCount = closedTrades.length;
+    const completedTradesCount = closedTrades.length;
+    const totalTradesCount = executedTrades.length;
     const winningTrades = closedTrades.filter((t) => t.pnl > 0);
     const losingTrades = closedTrades.filter((t) => t.pnl <= 0);
 
-    const winRate = totalTradesCount > 0 ? (winningTrades.length / totalTradesCount) * 100 : 0;
+    const winRate = completedTradesCount > 0 ? (winningTrades.length / completedTradesCount) * 100 : 0;
 
     const grossProfit = winningTrades.reduce((acc, t) => acc + t.pnl, 0);
     const grossLoss = Math.abs(losingTrades.reduce((acc, t) => acc + t.pnl, 0));
@@ -375,22 +380,29 @@ export class StrategyEngine {
         initialCapital: Number(initialCapital.toFixed(2)),
         finalCapital: Number(finalCapital.toFixed(2)),
         totalReturnPercent: Number(totalReturnPercent.toFixed(2)),
-        cagrPercent: Number(cagrPercent.toFixed(2)),
+        cagrPercent: cagrPercent,
         maxDrawdownPercent: Number(maxDrawdownValue.toFixed(2)),
         sharpeRatio: Number(sharpeRatio.toFixed(2)),
         winRatePercent: Number(winRate.toFixed(2)),
         profitFactor: Number(profitFactor.toFixed(2)),
         totalTrades: totalTradesCount,
+        completedTrades: completedTradesCount,
         winningTrades: winningTrades.length,
         losingTrades: losingTrades.length,
         alphaPercent: Number(alpha.toFixed(2)),
         beta: Number(beta.toFixed(2)),
-        startDate: dates[0],
-        endDate: dates[dates.length - 1],
+        startDate: dates[0] || 'N/A',
+        endDate: dates[dates.length - 1] || 'N/A',
         totalCandles: candles.length,
       },
       trades: executedTrades,
       equityCurve,
+      priceSeries: sortedCandles.map((c, idx) => ({
+        date: dates[idx],
+        open: Number(opens[idx].toFixed(2)),
+        close: Number(closes[idx].toFixed(2)),
+        signal: signals[idx] || 0,
+      })),
       executionRules: {
         lookAheadBias: 'NONE (Signal at Close T -> Execution at Open T+1)',
         slippagePercent,
